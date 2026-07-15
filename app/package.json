@@ -1,0 +1,27 @@
+{
+  "name": "iternest-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b",
+    "curriculum:pipeline": "node scripts/run-curriculum-pipeline.mjs",
+    "homeschool:pipeline": "node scripts/run-homeschool-reasoning-pipeline.mjs"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^6.1.200",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
+    "typescript": "latest",
+    "vite": "latest"
+  }
+}

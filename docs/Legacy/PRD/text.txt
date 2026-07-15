@@ -1,0 +1,4 @@
+Money map  notes
+When enter data, it only allows one number per tap before the keyboard hides and you have to re tap. 
+Potential idea to upload a csv or take a screen shot of bank screens and it automatically allocates those bills. Or even take a picture of bill and it puts it into the right categories. Or speech to text
+Math logic is all accurate. 
