@@ -243,8 +243,129 @@
   background: transparent;
 }
 
+.focus-view {
+  width: min(100%, 40rem);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 3rem;
+  color: #1f2c26;
+}
+
+.focus-view__back {
+  margin-bottom: 2rem;
+  padding: 0;
+  background: transparent;
+  color: #496f5d;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.focus-view__header {
+  margin-bottom: 1.5rem;
+}
+
+.focus-view__eyebrow {
+  margin: 0 0 0.55rem;
+  color: #5f766a;
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.focus-view__header h1 {
+  max-width: none;
+  margin: 0;
+  font-size: clamp(2rem, 10vw, 3.5rem);
+  line-height: 1.02;
+  letter-spacing: -0.05em;
+}
+
+.focus-view__header p:last-child {
+  margin: 0.8rem 0 0;
+  color: #68746e;
+  line-height: 1.5;
+}
+
+.focus-view__lesson,
+.focus-view__next {
+  border: 1px solid #d6e1d8;
+  border-radius: 1.5rem;
+  padding: 1.3rem;
+  background: #fffdf9;
+  box-shadow: 0 1rem 2.5rem rgb(45 65 55 / 8%);
+}
+
+.focus-view__lesson--approval {
+  border-color: #ead5cf;
+  background: #fffaf7;
+}
+
+.focus-view__lesson h2,
+.focus-view__next h2 {
+  margin: 0;
+  font-size: 1.4rem;
+  line-height: 1.2;
+  letter-spacing: -0.03em;
+}
+
+.focus-view__lesson > p,
+.focus-view__next p {
+  color: #657169;
+  line-height: 1.55;
+}
+
+.focus-view__steps {
+  display: grid;
+  grid-template-columns: 2rem 1fr;
+  gap: 0.8rem 0.9rem;
+  align-items: start;
+  margin: 1.25rem 0;
+}
+
+.focus-view__steps span {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: 999px;
+  background: #eaf2ec;
+  color: #496f5d;
+  font-weight: 900;
+}
+
+.focus-view__steps p {
+  margin: 0.25rem 0 0;
+  color: #4f5d55;
+  line-height: 1.45;
+}
+
+.focus-view__decision-note {
+  margin: 1.2rem 0;
+  border-radius: 1rem;
+  padding: 1rem;
+  background: #f3eee6;
+  color: #45534b;
+}
+
+.focus-view__decision-note p {
+  margin: 0.35rem 0 0;
+  line-height: 1.5;
+}
+
+.focus-view__actions {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.focus-view__next {
+  margin-top: 1rem;
+  background: #eef5ef;
+}
+
 @media (min-width: 42rem) {
-  .home-briefing {
+  .home-briefing,
+  .focus-view {
     padding: 1.75rem 1.5rem 4rem;
   }
 
