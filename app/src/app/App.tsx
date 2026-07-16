@@ -1,5 +1,5 @@
-import { ParentWorkflowPage } from '../pages/ParentWorkflowPage';
+import { ParentDailyCyclePage } from '../pages/ParentDailyCyclePage';
 
 export function App() {
-  return <ParentWorkflowPage />;
+  return <ParentDailyCyclePage />;
 }
