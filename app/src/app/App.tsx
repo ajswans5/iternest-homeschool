@@ -1,5 +1,5 @@
-import { ParentDashboardPage } from '../pages/ParentDashboardPage';
+import { ParentWorkflowPage } from '../pages/ParentWorkflowPage';
 
 export function App() {
-  return <ParentDashboardPage />;
+  return <ParentWorkflowPage />;
 }
