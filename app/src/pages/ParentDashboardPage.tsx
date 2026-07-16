@@ -6,7 +6,7 @@ import '../styles/parent-home.css';
 import { CurriculumLibraryPage } from './CurriculumLibraryPage';
 
 type AppView = 'today' | 'task' | 'approval' | 'learners' | 'tools';
-type TaskId = 'jack-handwriting' | 'remi-grammar' | 'spelling-quiz';
+type TaskId = 'jack-handwriting' | 'remi-grammar';
 type ApprovalStatus = 'pending' | 'approved' | 'kept';
 
 type PlanTask = {
@@ -26,9 +26,10 @@ type DayState = {
   completedTaskIds: TaskId[];
   approvalStatus: ApprovalStatus;
   recenterChoice: string | null;
+  tomorrowPrepComplete: boolean;
 };
 
-const STORAGE_KEY = 'iternest-homeschool-morning-plan-v2';
+const STORAGE_KEY = 'iternest-homeschool-morning-plan-v3';
 
 const planTasks: PlanTask[] = [
   {
@@ -65,35 +66,24 @@ const planTasks: PlanTask[] = [
     ],
     completionLabel: 'Grammar lesson complete',
   },
-  {
-    id: 'spelling-quiz',
-    owner: 'Parent prep',
-    title: 'Print spelling quiz',
-    duration: '2 minutes',
-    mode: 'Before lunch',
-    reason: 'Printing it now keeps the afternoon from starting with another setup task.',
-    description:
-      'Open the saved spelling quiz, print one copy, and place it with the afternoon materials.',
-    materials: ['Printer', 'One sheet of paper'],
-    steps: [
-      'Open the saved spelling quiz.',
-      'Print one copy.',
-      'Place it with the afternoon materials.',
-    ],
-    completionLabel: 'Quiz printed',
-  },
 ];
+
+const tomorrowPrep = {
+  title: 'Print spelling quiz',
+  duration: '2 minutes',
+  detail: 'Print it after today’s lessons so tomorrow begins ready instead of with another setup task.',
+};
 
 const recenterOptions: RecenterOption[] = [
   {
     label: 'We started late',
     description: 'Keep the teacher-led lesson and shorten the setup around it.',
-    result: 'The core sequence stays in place. Flexible work can move after lunch.',
+    result: 'The core learning sequence stays in place. Flexible work can move later.',
   },
   {
     label: 'We have less time today',
-    description: 'Protect the essential lesson and move the flexible item aside.',
-    result: 'Remi’s grammar lesson stays visible. The spelling quiz can move to tomorrow.',
+    description: 'Protect the essential lesson and move flexible learning work aside.',
+    result: 'Remi’s grammar lesson stays visible. Flexible independent work can move to tomorrow.',
   },
   {
     label: 'Someone needs a smaller start',
@@ -103,7 +93,7 @@ const recenterOptions: RecenterOption[] = [
   {
     label: 'Move flexible work',
     description: 'Keep required work today and move optional work forward.',
-    result: 'Only flexible work moves. Nothing teacher-led changes without approval.',
+    result: 'Only flexible learning work moves. Preparation stays in its own prep window.',
   },
 ];
 
@@ -111,6 +101,7 @@ const initialDayState: DayState = {
   completedTaskIds: [],
   approvalStatus: 'pending',
   recenterChoice: null,
+  tomorrowPrepComplete: false,
 };
 
 function isTaskId(value: unknown): value is TaskId {
@@ -138,6 +129,7 @@ function loadDayState(): DayState {
       approvalStatus,
       recenterChoice:
         typeof parsed.recenterChoice === 'string' ? parsed.recenterChoice : null,
+      tomorrowPrepComplete: parsed.tomorrowPrepComplete === true,
     };
   } catch {
     return initialDayState;
@@ -253,8 +245,15 @@ export function ParentDashboardPage() {
           onOpenApproval={() => setActiveView('approval')}
           onOpenTask={openTask}
           onOpenTools={() => setActiveView('tools')}
+          onToggleTomorrowPrep={() =>
+            setDayState((current) => ({
+              ...current,
+              tomorrowPrepComplete: !current.tomorrowPrepComplete,
+            }))
+          }
           recenterChoice={dayState.recenterChoice}
           recenterResult={recenterResult}
+          tomorrowPrepComplete={dayState.tomorrowPrepComplete}
         />
       ) : null}
 
@@ -336,8 +335,10 @@ type TodayViewProps = {
   onOpenApproval: () => void;
   onOpenTask: (taskId: TaskId) => void;
   onOpenTools: () => void;
+  onToggleTomorrowPrep: () => void;
   recenterChoice: string | null;
   recenterResult?: string;
+  tomorrowPrepComplete: boolean;
 };
 
 function TodayView({
@@ -349,8 +350,10 @@ function TodayView({
   onOpenApproval,
   onOpenTask,
   onOpenTools,
+  onToggleTomorrowPrep,
   recenterChoice,
   recenterResult,
+  tomorrowPrepComplete,
 }: TodayViewProps) {
   const isComplete = currentTask === null;
 
@@ -359,21 +362,25 @@ function TodayView({
       <section className="today-intro" aria-labelledby="today-title">
         <p className="eyebrow">Good morning</p>
         <h1 id="today-title">
-          {isComplete ? 'The morning plan is complete.' : 'Your first move is ready.'}
+          {isComplete ? 'Today’s learning block is complete.' : 'Your first move is ready.'}
         </h1>
         <p>
           {isComplete
-            ? 'The teaching sequence is finished. Anything still waiting is clearly marked below.'
-            : 'One clear starting point, followed by the next thing that needs you.'}
+            ? 'Learning is finished. Tomorrow’s preparation is separated below so it does not interrupt today’s teaching flow.'
+            : 'One clear starting point, followed by the next learning action that needs you.'}
         </p>
       </section>
 
       <section className="morning-progress" aria-label="Morning plan progress">
         <div>
-          <span>Morning plan</span>
+          <span>Learning block</span>
           <strong>{completedCount} of {planTasks.length} complete</strong>
         </div>
-        <div className="morning-progress__track" aria-hidden="true">
+        <div
+          className="morning-progress__track"
+          aria-hidden="true"
+          style={{ gridTemplateColumns: `repeat(${planTasks.length}, minmax(0, 1fr))` }}
+        >
           {planTasks.map((task) => (
             <span
               className={completedTaskIds.has(task.id) ? 'is-complete' : ''}
@@ -406,7 +413,7 @@ function TodayView({
             <p>{currentTask.reason}</p>
           </div>
           <button onClick={() => onOpenTask(currentTask.id)} type="button">
-            Open {currentTask.owner === 'Parent prep' ? 'task' : currentTask.owner}
+            Open {currentTask.owner}
             <span aria-hidden="true">→</span>
           </button>
         </section>
@@ -414,12 +421,12 @@ function TodayView({
         <section className="complete-card" aria-live="polite">
           <span className="complete-card__check" aria-hidden="true">✓</span>
           <div>
-            <p className="eyebrow">Morning block finished</p>
-            <h2>Everyone knows what comes next.</h2>
+            <p className="eyebrow">Learning finished</p>
+            <h2>The active school-day sequence is complete.</h2>
             <p>
               {approvalStatus === 'pending'
                 ? 'One suggested adjustment still needs your decision.'
-                : 'The plan and parent decision are both settled.'}
+                : 'The learning plan and parent decision are both settled.'}
             </p>
           </div>
           {approvalStatus === 'pending' ? (
@@ -431,7 +438,7 @@ function TodayView({
       <section className="day-sequence" aria-labelledby="sequence-title">
         <div className="section-heading-row">
           <div>
-            <p className="eyebrow">Today’s order</p>
+            <p className="eyebrow">Today’s learning order</p>
             <h2 id="sequence-title">Then what?</h2>
           </div>
           <span>{planTasks.length} steps</span>
@@ -465,6 +472,36 @@ function TodayView({
           })}
         </ol>
       </section>
+
+      {isComplete ? (
+        <section className="day-sequence" aria-labelledby="tomorrow-prep-title">
+          <div className="section-heading-row">
+            <div>
+              <p className="eyebrow">Post-day preparation</p>
+              <h2 id="tomorrow-prep-title">Get ready for tomorrow</h2>
+            </div>
+            <span>After lessons</span>
+          </div>
+
+          <ol className="sequence-list">
+            <li className={tomorrowPrepComplete ? 'is-complete' : 'is-current'}>
+              <button onClick={onToggleTomorrowPrep} type="button">
+                <span className="sequence-list__marker" aria-hidden="true">
+                  {tomorrowPrepComplete ? '✓' : '1'}
+                </span>
+                <span className="sequence-list__copy">
+                  <small>Tomorrow prep</small>
+                  <strong>{tomorrowPrep.title}</strong>
+                  <span>{tomorrowPrep.duration} · {tomorrowPrep.detail}</span>
+                </span>
+                <span className="sequence-list__status">
+                  {tomorrowPrepComplete ? 'Ready' : 'Prep'}
+                </span>
+              </button>
+            </li>
+          </ol>
+        </section>
+      ) : null}
 
       <button
         className={`attention-strip attention-strip--${approvalStatus}`}
@@ -562,7 +599,7 @@ function TaskView({
             <p>
               {nextTask
                 ? `Next: ${nextTask.owner} — ${nextTask.title}.`
-                : 'That finishes the morning sequence.'}
+                : 'That finishes the active learning sequence.'}
             </p>
           </div>
           <button className="primary-button" onClick={onContinue} type="button">
@@ -632,13 +669,13 @@ function ApprovalView({
             <div>
               <p className="eyebrow">Current plan</p>
               <h2>Finish spelling practice today.</h2>
-              <p>This adds another independent task after grammar.</p>
+              <p>This adds another independent learning task after grammar.</p>
             </div>
             <span className="decision-comparison__arrow" aria-hidden="true">→</span>
             <div className="decision-comparison__suggested">
               <p className="eyebrow">Suggested change</p>
               <h2 id="suggested-change-title">Move spelling practice to tomorrow.</h2>
-              <p>Keep today’s teacher-led grammar lesson and protect the shorter morning.</p>
+              <p>Keep today’s teacher-led grammar lesson and protect the shorter learning block.</p>
             </div>
           </section>
 
@@ -692,7 +729,7 @@ function LearnersView({ completedTaskIds, onOpenTask }: LearnersViewProps) {
       <section className="page-heading">
         <p className="eyebrow">Learners</p>
         <h1>Today, child by child.</h1>
-        <p>No percentages. Just the next useful thing for each learner.</p>
+        <p>No percentages. Just the next useful learning action for each learner.</p>
       </section>
 
       <div className="learner-list">
@@ -749,7 +786,7 @@ function ToolsView({
       <section className="page-heading">
         <p className="eyebrow">Parent tools</p>
         <h1>Adjust the plan without rebuilding it.</h1>
-        <p>These tools stay out of the way until you need them.</p>
+        <p>Preparation, decisions, and curriculum tools stay outside the active teaching sequence.</p>
       </section>
 
       <div className="tool-list">
