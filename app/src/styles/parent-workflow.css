@@ -1,0 +1,236 @@
+.phase-section {
+  margin-top: 1rem;
+}
+
+.phase-section__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.phase-section__header h2 {
+  margin: 0;
+  color: var(--forest-deep);
+  font-size: 1.55rem;
+  letter-spacing: -0.04em;
+}
+
+.phase-badge {
+  border-radius: 999px;
+  padding: 0.35rem 0.65rem;
+  background: #e4ebdf;
+  color: var(--forest);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.phase-section--learning .morning-progress {
+  margin-bottom: 1rem;
+}
+
+.prep-preview {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 2.8rem minmax(0, 1fr) auto;
+  gap: 0.85rem;
+  align-items: center;
+  margin-top: 1rem;
+  border: 1px solid #d8cbb7;
+  border-radius: 1.35rem;
+  padding: 1rem;
+  background: #f7f0e4;
+  cursor: pointer;
+  text-align: left;
+}
+
+.prep-preview__icon {
+  display: grid;
+  width: 2.8rem;
+  height: 2.8rem;
+  place-items: center;
+  border-radius: 0.9rem;
+  background: #e6d8c3;
+  color: #6d5331;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.prep-preview__copy {
+  display: grid;
+  gap: 0.14rem;
+}
+
+.prep-preview__copy small {
+  color: #846c4d;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.prep-preview__copy strong {
+  color: var(--ink);
+  font-size: 0.98rem;
+}
+
+.prep-preview__copy > span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.prep-preview__timing {
+  border-radius: 999px;
+  padding: 0.3rem 0.55rem;
+  background: #efe2cf;
+  color: #765a36;
+  font-size: 0.65rem;
+  font-weight: 900;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+.prep-view .page-heading {
+  margin-bottom: 1rem;
+}
+
+.prep-boundary-note {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: start;
+  margin-bottom: 1rem;
+  border: 1px solid #d9cdbb;
+  border-radius: 1.1rem;
+  padding: 0.9rem 1rem;
+  background: #f3eadc;
+}
+
+.prep-boundary-note > span {
+  display: grid;
+  width: 2.4rem;
+  height: 2.4rem;
+  place-items: center;
+  border-radius: 999px;
+  background: #e3d4be;
+  color: #755939;
+  font-weight: 900;
+}
+
+.prep-boundary-note strong {
+  color: var(--ink);
+}
+
+.prep-boundary-note p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.prep-task-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.prep-task {
+  border: 1px solid #d9cdbb;
+  border-radius: 1.45rem;
+  padding: 1.1rem;
+  background: var(--paper);
+}
+
+.prep-task.is-complete {
+  border-color: #c9d8cb;
+  background: #edf3ed;
+}
+
+.prep-task__heading {
+  display: grid;
+  grid-template-columns: 2.6rem minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.prep-task__heading > span {
+  display: grid;
+  width: 2.6rem;
+  height: 2.6rem;
+  place-items: center;
+  border-radius: 0.85rem;
+  background: #e7dac6;
+  color: #6c512f;
+  font-weight: 900;
+}
+
+.prep-task.is-complete .prep-task__heading > span {
+  background: var(--forest);
+  color: #fff;
+}
+
+.prep-task h2 {
+  margin: 0;
+  color: var(--forest-deep);
+  font-size: 1.35rem;
+  letter-spacing: -0.035em;
+}
+
+.prep-task > p {
+  margin: 0.95rem 0 1rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.prep-task .instruction-list {
+  margin-bottom: 1rem;
+}
+
+.tomorrow-ready {
+  display: grid;
+  grid-template-columns: 2.8rem minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: start;
+  margin-top: 1rem;
+  border: 1px solid #c6d7c9;
+  border-radius: 1.35rem;
+  padding: 1rem;
+  background: #e6efe7;
+}
+
+.tomorrow-ready > span {
+  display: grid;
+  width: 2.8rem;
+  height: 2.8rem;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--forest);
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 900;
+}
+
+.tomorrow-ready h2 {
+  margin: 0;
+  color: var(--forest-deep);
+  font-size: 1.35rem;
+  letter-spacing: -0.035em;
+}
+
+.tomorrow-ready p:last-child {
+  margin: 0.4rem 0 0;
+  color: #5d6c62;
+  line-height: 1.45;
+}
+
+@media (min-width: 42rem) {
+  .prep-preview {
+    padding: 1.1rem 1.15rem;
+  }
+
+  .prep-task {
+    padding: 1.35rem;
+  }
+}
