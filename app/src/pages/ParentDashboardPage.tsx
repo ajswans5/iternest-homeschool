@@ -5,6 +5,8 @@ import type { ApprovedLesson } from '../features/curriculum-import/types';
 import '../styles/parent-home.css';
 import { CurriculumLibraryPage } from './CurriculumLibraryPage';
 
+type HomeView = 'briefing' | 'jack' | 'approval';
+
 const recenterOptions: RecenterOption[] = [
   {
     label: 'We started late',
@@ -48,10 +50,13 @@ const attentionItem = {
 };
 
 export function ParentDashboardPage() {
+  const [activeView, setActiveView] = useState<HomeView>('briefing');
   const [isRecenterPanelOpen, setIsRecenterPanelOpen] = useState(false);
   const [isImportFlowOpen, setIsImportFlowOpen] = useState(false);
   const [isCurriculumLibraryOpen, setIsCurriculumLibraryOpen] = useState(false);
   const [approvedImportedLessons, setApprovedImportedLessons] = useState<ApprovedLesson[]>([]);
+  const [isCatchUpApproved, setIsCatchUpApproved] = useState(false);
+  const [isHandwritingComplete, setIsHandwritingComplete] = useState(false);
 
   const today = new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
@@ -73,6 +78,118 @@ export function ParentDashboardPage() {
       <CurriculumLibraryPage
         onBackToDashboard={() => setIsCurriculumLibraryOpen(false)}
       />
+    );
+  }
+
+  if (activeView === 'jack') {
+    return (
+      <main className="focus-view">
+        <button
+          className="focus-view__back"
+          onClick={() => setActiveView('briefing')}
+          type="button"
+        >
+          ← Back to today
+        </button>
+
+        <header className="focus-view__header">
+          <p className="focus-view__eyebrow">Jack · Start here</p>
+          <h1>{startHere.task}</h1>
+          <p>{startHere.duration} · Independent</p>
+        </header>
+
+        <section className="focus-view__lesson" aria-labelledby="jack-instructions-title">
+          <p className="home-briefing__section-label">Ready for Jack</p>
+          <h2 id="jack-instructions-title">Complete today&apos;s handwriting page.</h2>
+          <p>
+            Jack can begin this without parent instruction. Keep the page and pencil ready,
+            then use the time to prepare Remi&apos;s grammar lesson.
+          </p>
+
+          <div className="focus-view__steps" aria-label="Handwriting steps">
+            <span>1</span>
+            <p>Open the assigned handwriting page.</p>
+            <span>2</span>
+            <p>Complete the copywork carefully.</p>
+            <span>3</span>
+            <p>Leave the page for parent review.</p>
+          </div>
+
+          <button
+            className="home-briefing__primary-button"
+            onClick={() => setIsHandwritingComplete(true)}
+            type="button"
+          >
+            {isHandwritingComplete ? 'Handwriting marked complete' : 'Mark handwriting complete'}
+          </button>
+        </section>
+
+        {isHandwritingComplete ? (
+          <section className="focus-view__next" aria-live="polite">
+            <p className="home-briefing__section-label">You&apos;re ready for the next step</p>
+            <h2>Teach Remi&apos;s grammar lesson.</h2>
+            <p>Estimated time: {nextActivity.duration}</p>
+            <button
+              className="home-briefing__attention-button"
+              onClick={() => setActiveView('briefing')}
+              type="button"
+            >
+              Return to today
+            </button>
+          </section>
+        ) : null}
+      </main>
+    );
+  }
+
+  if (activeView === 'approval') {
+    return (
+      <main className="focus-view">
+        <button
+          className="focus-view__back"
+          onClick={() => setActiveView('briefing')}
+          type="button"
+        >
+          ← Back to today
+        </button>
+
+        <header className="focus-view__header">
+          <p className="focus-view__eyebrow">Needs your attention</p>
+          <h1>Catch-up recommendation</h1>
+          <p>Nothing changes until you approve it.</p>
+        </header>
+
+        <section className="focus-view__lesson focus-view__lesson--approval">
+          <p className="home-briefing__section-label">Suggested adjustment</p>
+          <h2>Move unfinished spelling practice to tomorrow.</h2>
+          <p>
+            This keeps today&apos;s teacher-led grammar lesson in place while preserving the
+            unfinished spelling work for the next school day.
+          </p>
+
+          <div className="focus-view__decision-note">
+            <strong>Why this surfaced</strong>
+            <p>Spelling is flexible. Remi&apos;s grammar lesson needs your attention today.</p>
+          </div>
+
+          <div className="focus-view__actions">
+            <button
+              className="home-briefing__primary-button"
+              onClick={() => setIsCatchUpApproved(true)}
+              type="button"
+            >
+              {isCatchUpApproved ? 'Recommendation approved' : 'Approve adjustment'}
+            </button>
+            <button
+              className="home-briefing__utility-button home-briefing__utility-button--quiet"
+              onClick={() => setActiveView('briefing')}
+              type="button"
+            >
+              Keep today&apos;s plan
+            </button>
+          </div>
+        </section>
+      </main>
     );
   }
 
@@ -104,7 +221,11 @@ export function ParentDashboardPage() {
         <p className="home-briefing__reason">
           <strong>Why this first:</strong> {startHere.reason}
         </p>
-        <button className="home-briefing__primary-button" type="button">
+        <button
+          className="home-briefing__primary-button"
+          onClick={() => setActiveView('jack')}
+          type="button"
+        >
           Open {startHere.student}
         </button>
       </section>
@@ -132,10 +253,20 @@ export function ParentDashboardPage() {
           aria-labelledby="attention-title"
         >
           <p className="home-briefing__section-label">Needs your attention</p>
-          <h2 id="attention-title">Approve: {attentionItem.task}</h2>
-          <p>{attentionItem.detail}</p>
-          <button className="home-briefing__attention-button" type="button">
-            Review recommendation
+          <h2 id="attention-title">
+            {isCatchUpApproved ? 'Approved: ' : 'Approve: '}{attentionItem.task}
+          </h2>
+          <p>
+            {isCatchUpApproved
+              ? 'The adjustment is approved and ready for the next planning update.'
+              : attentionItem.detail}
+          </p>
+          <button
+            className="home-briefing__attention-button"
+            onClick={() => setActiveView('approval')}
+            type="button"
+          >
+            {isCatchUpApproved ? 'View approved recommendation' : 'Review recommendation'}
           </button>
         </section>
       </div>
