@@ -1,4 +1,4 @@
-﻿import type { LessonModel, LessonWorkItem } from '../../domain/contracts';
+import type { LessonModel, LessonWorkItem } from '../../domain/contracts';
 import type { ParentDecisionV2 } from '../parent-decision/contracts';
 import type { SourceFinding, UploadedCurriculumAnalysis } from '../curriculum-import/types';
 
@@ -13,6 +13,7 @@ export type PersistedLearningTask = {
   materials: string[];
   studentSteps: string[];
   completionLabel: string;
+  audience?: 'student' | 'parent' | 'shared' | 'unknown';
 };
 
 export type PersistedPrepTask = {
@@ -86,7 +87,8 @@ export function loadPersistedHomeschoolData(): PersistedHomeschoolData {
       ? parsed.curricula.filter(isPersistedCurriculumRecord)
       : [];
     const activeCurriculumId =
-      typeof parsed.activeCurriculumId === 'string' && curricula.some((record) => record.id === parsed.activeCurriculumId)
+      typeof parsed.activeCurriculumId === 'string' &&
+      curricula.some((record) => record.id === parsed.activeCurriculumId)
         ? parsed.activeCurriculumId
         : curricula[0]?.id ?? null;
 
@@ -108,17 +110,26 @@ export function emptyPersistedHomeschoolData(): PersistedHomeschoolData {
 }
 
 export function getActiveCurriculumRecord(data: PersistedHomeschoolData) {
-  return data.curricula.find((record) => record.id === data.activeCurriculumId) ?? data.curricula[0] ?? null;
+  return (
+    data.curricula.find((record) => record.id === data.activeCurriculumId) ??
+    data.curricula[0] ??
+    null
+  );
 }
 
 export function upsertCurriculumRecord(
   data: PersistedHomeschoolData,
   record: PersistedCurriculumRecord,
 ): PersistedHomeschoolData {
-  const existingIndex = data.curricula.findIndex((curriculum) => curriculum.id === record.id);
-  const curricula = existingIndex === -1
-    ? [record, ...data.curricula]
-    : data.curricula.map((curriculum) => (curriculum.id === record.id ? record : curriculum));
+  const existingIndex = data.curricula.findIndex(
+    (curriculum) => curriculum.id === record.id,
+  );
+  const curricula =
+    existingIndex === -1
+      ? [record, ...data.curricula]
+      : data.curricula.map((curriculum) =>
+          curriculum.id === record.id ? record : curriculum,
+        );
 
   return {
     activeCurriculumId: record.id,
@@ -191,56 +202,72 @@ function buildDailyCyclePlan(
   lessonModel: LessonModel | null,
   curriculumId: string,
 ): PersistedDailyCyclePlan {
-  const lessonTitle = lessonModel?.title.value ?? sourceAnalysis.lessonHeadingsFound[0]?.value ?? sourceAnalysis.fileName;
-  const subject = lessonModel?.subject.value ?? sourceAnalysis.subjectsFound[0]?.value ?? 'Curriculum';
-  const duration = lessonModel?.estimatedDurationMinutes.value
+  if (!lessonModel || sourceAnalysis.readableTextLength === 0) {
+    return { learningTasks: [], prepTasks: [] };
+  }
+
+  const lessonTitle =
+    lessonModel.title.value ??
+    sourceAnalysis.lessonHeadingsFound[0]?.value ??
+    sourceAnalysis.fileName;
+  const subject =
+    lessonModel.subject.value ?? sourceAnalysis.subjectsFound[0]?.value ?? 'Curriculum';
+  const duration = lessonModel.estimatedDurationMinutes.value
     ? `${lessonModel.estimatedDurationMinutes.value} minutes`
     : 'Time not stated';
   const materials = unique(
-    lessonModel?.materialsRequired.map((item) => item.text).filter(Boolean) ?? [],
+    lessonModel.materialsRequired
+      .map((item) => normalizeMaterialLabel(item.text))
+      .filter(Boolean),
   );
-  const learningWork = lessonModel
-    ? [
-        ...lessonModel.teacherResponsibilities,
-        ...lessonModel.studentResponsibilities,
-        ...lessonModel.reviewsAndAssessments,
-      ]
-    : [];
-  const learningTasks = learningWork.length > 0
-    ? learningWork.map((item, index) => toLearningTask(item, index, curriculumId, subject, lessonTitle, duration, materials))
-    : sourceAnalysis.lessonHeadingsFound.slice(0, 4).map((heading, index) => ({
-        id: `${curriculumId}-heading-${index + 1}`,
-        owner: subject,
-        title: heading.value,
-        duration,
-        mode: 'Needs parent review',
-        reason: `This item was found directly in ${heading.sourceLocation}. IterNest needs parent confirmation before treating it as a teaching task.`,
-        description: heading.evidence,
-        materials: materials.length > 0 ? materials : ['No materials stated in the source.'],
-        studentSteps: [heading.evidence],
-        completionLabel: `${heading.value} reviewed`,
-      }));
-  const fallbackLearningTasks = learningTasks.length > 0
-    ? learningTasks
-    : [
-        {
-          id: `${curriculumId}-source-review`,
-          owner: subject,
-          title: `Review ${sourceAnalysis.fileName}`,
-          duration,
-          mode: 'Needs parent review',
-          reason: 'The uploaded source did not expose a complete lesson task. Parent review is required before teaching.',
-          description: sourceAnalysis.limitations[0] ?? 'No lesson task was identified from this source.',
-          materials: materials.length > 0 ? materials : ['No materials stated in the source.'],
-          studentSteps: [sourceAnalysis.limitations[0] ?? 'Review the uploaded curriculum source.'],
-          completionLabel: 'Source reviewed',
-        },
-      ];
+  const learningWork = orderLearningWork(lessonModel, [
+    ...lessonModel.teacherResponsibilities,
+    ...lessonModel.studentResponsibilities,
+    ...lessonModel.reviewsAndAssessments,
+  ]);
+  const learningTasks = learningWork.map((item, index) =>
+    toLearningTask(
+      item,
+      index,
+      curriculumId,
+      subject,
+      lessonTitle,
+      duration,
+      materials,
+    ),
+  );
+
+  if (learningTasks.length === 0) {
+    return { learningTasks: [], prepTasks: [] };
+  }
+
+  const hasPrintableTasks = learningTasks.some(
+    (task) => task.audience === 'student' || task.audience === 'shared',
+  );
 
   return {
-    learningTasks: fallbackLearningTasks,
-    prepTasks: buildPrepTasks(sourceAnalysis, lessonTitle, subject, materials, curriculumId),
+    learningTasks,
+    prepTasks: buildPrepTasks(
+      sourceAnalysis,
+      lessonTitle,
+      subject,
+      materials,
+      curriculumId,
+      hasPrintableTasks,
+    ),
   };
+}
+
+function orderLearningWork(lessonModel: LessonModel, workItems: LessonWorkItem[]) {
+  const sourceOrder = new Map(
+    lessonModel.sourceEvidence.map((evidence, index) => [evidence.id, index]),
+  );
+
+  return [...workItems].sort((first, second) => {
+    const firstOrder = sourceOrder.get(first.evidence[0]?.id ?? '') ?? Number.MAX_SAFE_INTEGER;
+    const secondOrder = sourceOrder.get(second.evidence[0]?.id ?? '') ?? Number.MAX_SAFE_INTEGER;
+    return firstOrder - secondOrder;
+  });
 }
 
 function toLearningTask(
@@ -252,17 +279,20 @@ function toLearningTask(
   duration: string,
   materials: string[],
 ): PersistedLearningTask {
+  const sourceLocation = item.evidence[0]?.sourceLocation;
+
   return {
     id: `${curriculumId}-learning-${index + 1}-${stableSlug(item.id)}`,
-    owner: subject,
+    owner: ownerForWorkType(item.type, subject),
     title: item.text,
     duration,
     mode: modeForWorkType(item.type),
-    reason: `This task is part of ${lessonTitle} and is supported by source evidence${item.evidence[0] ? ` from ${item.evidence[0].sourceLocation}` : ''}.`,
+    reason: `This task is part of ${lessonTitle} and is supported by source evidence${sourceLocation ? ` from ${sourceLocation}` : ''}.`,
     description: item.text,
-    materials: materials.length > 0 ? materials : ['No materials stated in the source.'],
+    materials,
     studentSteps: [item.text],
-    completionLabel: `${item.text} complete`,
+    completionLabel: 'Mark task complete',
+    audience: audienceForWorkType(item.type),
   };
 }
 
@@ -272,56 +302,77 @@ function buildPrepTasks(
   subject: string,
   materials: string[],
   curriculumId: string,
+  hasPrintableTasks: boolean,
 ): PersistedPrepTask[] {
   const materialTasks = materials.slice(0, 4).map((material, index) => ({
     id: `${curriculumId}-prep-material-${index + 1}`,
     title: `Gather ${material}`,
     duration: 'Time not stated',
     reason: `The source lists this material for ${lessonTitle}.`,
-    steps: [`Place ${material} with ${subject} materials for the next session.`],
+    steps: [`Place ${material} with the ${subject} materials for the next session.`],
     morningReminder: `${material} is ready for ${subject}.`,
   }));
   const nextHeading = sourceAnalysis.lessonHeadingsFound[1];
-  const printTask = {
-    id: `${curriculumId}-prep-print-student-sheets`,
-    title: `Print student sheet for ${lessonTitle}`,
-    duration: '1 minute',
-    reason: 'The student-facing sheet is generated from the imported curriculum task list.',
-    steps: ['Open Print student task sheets.', `Print the sheet for ${subject}.`],
-    morningReminder: `Student sheet for ${lessonTitle} is printed.`,
-  };
-  const nextLessonTask = nextHeading
-    ? [{
-        id: `${curriculumId}-prep-next-${stableSlug(nextHeading.id)}`,
-        title: `Preview ${nextHeading.value}`,
-        duration: 'Time not stated',
-        reason: `This next lesson heading was found directly in ${nextHeading.sourceLocation}.`,
-        steps: [`Open the curriculum to ${nextHeading.value}.`, 'Check whether any parent preparation is required.'],
-        morningReminder: `${nextHeading.value} has been previewed.`,
-      }]
+  const printTasks = hasPrintableTasks
+    ? [
+        {
+          id: `${curriculumId}-prep-print-student-sheets`,
+          title: `Print student task sheet for ${lessonTitle}`,
+          duration: '1 minute',
+          reason: 'The student-facing sheet is generated from the imported curriculum task list.',
+          steps: ['Open Print student task sheets.', 'Print the student-safe task sheet.'],
+          morningReminder: `The student task sheet for ${lessonTitle} is printed.`,
+        },
+      ]
+    : [];
+  const nextLessonTasks = nextHeading
+    ? [
+        {
+          id: `${curriculumId}-prep-next-${stableSlug(nextHeading.id)}`,
+          title: `Preview ${nextHeading.value}`,
+          duration: 'Time not stated',
+          reason: `This next lesson heading was found directly in ${nextHeading.sourceLocation}.`,
+          steps: [
+            `Open the curriculum to ${nextHeading.value}.`,
+            'Check whether any parent preparation is required.',
+          ],
+          morningReminder: `${nextHeading.value} has been previewed.`,
+        },
+      ]
     : [];
 
-  return [...materialTasks, printTask, ...nextLessonTask];
+  return [...materialTasks, ...printTasks, ...nextLessonTasks];
+}
+
+function ownerForWorkType(type: LessonWorkItem['type'], subject: string) {
+  if (type === 'teacher-led') return 'Parent-led';
+  if (type === 'student-independent') return 'Learner';
+  if (type === 'review') return 'Parent review';
+  if (type === 'assessment') return 'Learner + parent';
+  return subject;
+}
+
+function audienceForWorkType(
+  type: LessonWorkItem['type'],
+): PersistedLearningTask['audience'] {
+  if (type === 'teacher-led' || type === 'review') return 'parent';
+  if (type === 'student-independent') return 'student';
+  if (type === 'assessment') return 'shared';
+  return 'unknown';
 }
 
 function modeForWorkType(type: LessonWorkItem['type']) {
-  if (type === 'teacher-led') {
-    return 'With parent';
-  }
-
-  if (type === 'student-independent') {
-    return 'Independent';
-  }
-
-  if (type === 'review') {
-    return 'Review';
-  }
-
-  if (type === 'assessment') {
-    return 'Assessment';
-  }
-
+  if (type === 'teacher-led') return 'With parent';
+  if (type === 'student-independent') return 'Independent';
+  if (type === 'review') return 'Parent review';
+  if (type === 'assessment') return 'Assessment';
   return 'Needs parent review';
+}
+
+function normalizeMaterialLabel(value: string) {
+  return value
+    .replace(/^\s*(materials?|supplies|required|need|gather)\s*[:\-]?\s*/i, '')
+    .trim();
 }
 
 function isPersistedCurriculumRecord(value: unknown): value is PersistedCurriculumRecord {
@@ -344,8 +395,10 @@ function unique(values: string[]) {
 }
 
 function stableSlug(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '') || 'unknown';
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'unknown'
+  );
 }
