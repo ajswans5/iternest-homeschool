@@ -1,5 +1,5 @@
-import { ParentDailyCyclePage } from '../pages/ParentDailyCyclePage';
+import { ParentDailyCyclePageDebugged } from '../pages/ParentDailyCyclePageDebugged';
 
 export function App() {
-  return <ParentDailyCyclePage />;
+  return <ParentDailyCyclePageDebugged />;
 }
