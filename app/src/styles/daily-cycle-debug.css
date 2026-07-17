@@ -1,0 +1,87 @@
+.cycle-empty-copy {
+  margin: 0;
+  color: var(--cycle-muted);
+  line-height: 1.5;
+}
+
+.cycle-decision-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+}
+
+.cycle-decision-overview > div {
+  display: grid;
+  gap: 0.2rem;
+  border: 1px solid var(--cycle-line);
+  border-radius: 1rem;
+  padding: 0.85rem;
+  background: var(--cycle-paper);
+}
+
+.cycle-decision-overview small {
+  color: var(--cycle-muted);
+  font-size: 0.65rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.cycle-decision-overview strong {
+  color: var(--cycle-forest-deep);
+  overflow-wrap: anywhere;
+  text-transform: capitalize;
+}
+
+.cycle-decision-section {
+  margin-bottom: 0.85rem;
+  border: 1px solid var(--cycle-line);
+  border-radius: 1.3rem;
+  padding: 1rem;
+  background: var(--cycle-paper);
+}
+
+.cycle-decision-section .cycle-prep-task-list {
+  gap: 0.65rem;
+}
+
+.cycle-decision-section .cycle-prep-task {
+  padding: 0.85rem;
+  background: #fbf7ef;
+}
+
+.cycle-decision-section .cycle-prep-task h2 {
+  margin-bottom: 0.35rem;
+  font-size: 1rem;
+}
+
+.cycle-decision-section .cycle-prep-task p {
+  margin: 0;
+}
+
+.cycle-curriculum-selector {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.75rem;
+}
+
+.cycle-curriculum-selector button {
+  box-shadow: none;
+  overflow-wrap: anywhere;
+}
+
+.cycle-tool-list > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.cycle-tool-list > button:disabled > span:first-child {
+  filter: grayscale(1);
+}
+
+@media (max-width: 34rem) {
+  .cycle-decision-overview {
+    grid-template-columns: 1fr;
+  }
+}
