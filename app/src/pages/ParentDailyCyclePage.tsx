@@ -1217,6 +1217,10 @@ function createDailyCyclePageDebugTimer(scope: string) {
   let lastAt = startedAt;
 
   function log(label: string, details?: DailyCyclePageDebugDetails) {
+    if (!isImportDebugEnabled()) {
+      return;
+    }
+
     const now = performance.now();
     const elapsedMs = Math.round(now - startedAt);
     const deltaMs = Math.round(now - lastAt);
@@ -1239,4 +1243,14 @@ function createDailyCyclePageDebugTimer(scope: string) {
       log(label, details);
     },
   };
+}
+function isImportDebugEnabled() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return (
+    window.localStorage.getItem('iternest-debug-import') === 'true' ||
+    new URLSearchParams(window.location.search).get('debugImport') === 'true'
+  );
 }

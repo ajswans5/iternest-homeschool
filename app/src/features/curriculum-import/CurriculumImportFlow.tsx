@@ -14,23 +14,23 @@ import {
 } from './curriculumDecisionPipeline';
 import type { CurriculumImportFile } from './types';
 
-type ImportStep = 'start' | 'upload' | 'analyzing-source' | 'parent-decision' | 'approved';
+type ImportStep = 'start' | 'upload' | 'analyzing-source' | 'parent-review' | 'approved';
 
 type CurriculumImportFlowProps = {
   onCancel: () => void;
   onApprove: (curriculum: PersistedCurriculumRecord) => void;
 };
 
-const parentDecisionProgressSteps = [
-  'Reading source evidence...',
-  'Building curriculum intelligence summary...',
-  'Assembling decision context...',
-  'Running ParentDecisionV2...',
-  'Preparing the daily-cycle record...',
+const parentReviewProgressSteps = [
+  'Opening the curriculum file...',
+  'Reading the lesson text...',
+  'Finding teachable work...',
+  'Preparing the parent review...',
+  'Building the daily-cycle preview...',
 ];
 
 const analysisStepDurationMs = 500;
-const minimumAnalysisDurationMs = parentDecisionProgressSteps.length * analysisStepDurationMs;
+const minimumAnalysisDurationMs = parentReviewProgressSteps.length * analysisStepDurationMs;
 
 export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFlowProps) {
   const [step, setStep] = useState<ImportStep>('start');
@@ -47,7 +47,7 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
 
     const timeoutId = window.setTimeout(() => {
       setCurrentAnalysisStepIndex((currentIndex) => {
-        if (currentIndex >= parentDecisionProgressSteps.length - 1) {
+        if (currentIndex >= parentReviewProgressSteps.length - 1) {
           return currentIndex;
         }
 
@@ -123,20 +123,20 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
       setAnalysisResult(result);
       debug.after('setAnalysisResult(result)');
 
-      debug.before("setStep('parent-decision')");
-      setStep('parent-decision');
-      debug.after("setStep('parent-decision')");
+      debug.before("setStep('parent-review')");
+      setStep('parent-review');
+      debug.after("setStep('parent-review')");
     } catch (error) {
-      console.error('[IterNest import] CurriculumImportFlow.handleAnalyzeCurriculum | caught error', error);
+      logImportDebugError('CurriculumImportFlow.handleAnalyzeCurriculum | caught error', error);
       setAnalysisError(
-        'IterNest could not safely inspect this file in the browser. If this is a scanned curriculum PDF or photo, OCR is required before IterNest can build a reliable Decision Context.',
+        'IterNest could not safely inspect this file. If this is a scanned curriculum PDF or photo, OCR will be required before IterNest can build a reliable parent review.',
       );
-      setStep('parent-decision');
+      setStep('parent-review');
     }
   }
 
-  function handleApproveParentDecision() {
-    const debug = createImportFlowDebugTimer('CurriculumImportFlow.handleApproveParentDecision');
+  function handleApproveParentReview() {
+    const debug = createImportFlowDebugTimer('CurriculumImportFlow.handleApproveParentReview');
     debug.checkpoint('approval handler invoked', { hasAnalysisResult: Boolean(analysisResult) });
 
     if (!analysisResult) {
@@ -160,10 +160,10 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
           Back to daily cycle
         </button>
         <p className="section-label">Curriculum Import</p>
-        <h1>Import curriculum into the daily cycle.</h1>
+        <h1>Review this curriculum before it becomes part of your day.</h1>
         <p>
-          IterNest reads the source, preserves uncertainty, builds a ParentDecisionV2 result,
-          and stores the approved curriculum as the active daily-cycle source.
+          IterNest reads the source, shows what it can use, and asks for your approval
+          before adding anything to the daily cycle.
         </p>
       </header>
 
@@ -171,8 +171,9 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
         <section className="import-card">
           <h2>Start with a curriculum PDF</h2>
           <p>
-            Uploading a different curriculum creates a different Start Here task, sequence,
-            materials reminder, printable student sheet, and tomorrow-prep list.
+            Uploading a curriculum creates a parent-reviewable preview of the first usable
+            daily cycle: what to start with, what materials are needed, what can be printed,
+            and what should be prepared for tomorrow.
           </p>
           <button className="primary-action primary-action--inline" onClick={() => setStep('upload')} type="button">
             Import Curriculum
@@ -209,16 +210,16 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
       {step === 'analyzing-source' ? (
         <AnalysisStep
           currentStepIndex={currentAnalysisStepIndex}
-          steps={parentDecisionProgressSteps}
-          title="Building the parent decision"
+          steps={parentReviewProgressSteps}
+          title="Preparing your curriculum review"
         />
       ) : null}
 
-      {step === 'parent-decision' ? (
-        <ParentDecisionView
+      {step === 'parent-review' ? (
+        <CurriculumParentReview
           analysisError={analysisError}
-          decision={analysisResult?.decision ?? null}
-          onApprove={handleApproveParentDecision}
+          result={analysisResult}
+          onApprove={handleApproveParentReview}
         />
       ) : null}
 
@@ -227,8 +228,8 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
           <p className="section-label">Curriculum Saved</p>
           <h2>This curriculum is now the active daily-cycle source.</h2>
           <p>
-            The daily-cycle UI will read from the persisted curriculum record, its continuity state,
-            and the ParentDecisionV2 data generated during import.
+            Your Start Here card, learning sequence, materials list, printable student sheets,
+            and tomorrow-prep list will now come from this curriculum.
           </p>
           <button className="primary-action primary-action--inline" onClick={onCancel} type="button">
             Return to daily cycle
@@ -239,83 +240,167 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
   );
 }
 
-type ParentDecisionViewProps = {
+type CurriculumParentReviewProps = {
   analysisError: string | null;
-  decision: ParentDecisionV2 | null;
+  result: CurriculumImportDecisionResult | null;
   onApprove: () => void;
 };
 
-function ParentDecisionView({ analysisError, decision, onApprove }: ParentDecisionViewProps) {
+function CurriculumParentReview({ analysisError, result, onApprove }: CurriculumParentReviewProps) {
   if (analysisError) {
     return (
       <section className="decision-engine-card">
-        <p className="section-label">ParentDecisionV2</p>
-        <h2>I don't have enough evidence to determine this.</h2>
+        <p className="section-label">Curriculum Review</p>
+        <h2>This file needs more help before IterNest can use it.</h2>
         <p>{analysisError}</p>
       </section>
     );
   }
 
-  if (!decision) {
+  if (!result) {
     return (
       <section className="decision-engine-card">
-        <p className="section-label">ParentDecisionV2</p>
-        <h2>I don't have enough evidence to determine this.</h2>
-        <p>The curriculum analysis did not produce a parent decision yet.</p>
+        <p className="section-label">Curriculum Review</p>
+        <h2>No review is ready yet.</h2>
+        <p>Choose a curriculum file and run analysis first.</p>
       </section>
     );
   }
 
+  const curriculum = result.curriculumRecord;
+  const firstTask = curriculum.dailyCycle.learningTasks[0] ?? null;
+  const materials = uniqueStrings(curriculum.dailyCycle.learningTasks.flatMap((task) => task.materials));
+  const printableTasks = curriculum.dailyCycle.learningTasks.filter(
+    (task) => task.audience === 'student' || task.audience === 'shared',
+  );
+  const hasReadableText = curriculum.source.readableTextLength > 0;
+
   return (
     <section className="import-review">
       <section className="decision-engine-card">
-        <p className="section-label">ParentDecisionV2</p>
-        <h2>{readinessTitle(decision)}</h2>
-        <p>{decision.readiness.rationale}</p>
+        <p className="section-label">Curriculum Review</p>
+        <h2>{hasReadableText ? 'Here is the daily-cycle preview I can build.' : 'This source is not ready for daily-cycle use yet.'}</h2>
+        <p>
+          {hasReadableText
+            ? 'Review the first usable teaching sequence below. Nothing is added to your day until you save it.'
+            : 'I could save the file reference, but I cannot create teaching tasks from this source without readable text.'}
+        </p>
 
-        <div className="import-summary" aria-label="Decision summary">
-          <span>{decision.readiness.status}</span>
-          <span>{decision.confidence.level}</span>
-          <span>{decision.evidenceTraces.length} evidence traces</span>
+        <div className="import-summary" aria-label="Curriculum review summary">
+          <span>{curriculum.source.fileName}</span>
+          <span>{curriculum.dailyCycle.learningTasks.length} learning tasks</span>
+          <span>{curriculum.dailyCycle.prepTasks.length} prep items</span>
         </div>
 
-        <SourceSummaryStatuses decision={decision} />
-        <AttentionList items={decision.attentionRequired} />
-        <ConfirmationList items={decision.confirmationsRequired} />
-        <BlockerList items={decision.blockers} />
-        <UncertaintyList items={decision.unresolvedUncertainty} />
-        <DeferredList items={decision.deferredItems} />
+        <ParentReviewSection title="What I found in the source">
+          <ul>
+            <li>Readable text: {hasReadableText ? 'yes' : 'not available'}</li>
+            <li>Subjects found: {summaryList(curriculum.curriculum.subjectsFound.map((item) => item.value))}</li>
+            <li>Lesson headings found: {summaryList(curriculum.curriculum.lessonHeadingsFound.map((item) => item.value))}</li>
+            <li>Sections found: {summaryList(curriculum.curriculum.detectedSections.map((item) => item.label))}</li>
+          </ul>
+        </ParentReviewSection>
+
+        {curriculum.source.limitations.length > 0 ? (
+          <ParentReviewSection title="What still needs parent review">
+            <ul>
+              {curriculum.source.limitations.map((limitation) => (
+                <li key={limitation}>{limitation}</li>
+              ))}
+            </ul>
+          </ParentReviewSection>
+        ) : null}
+
+        {firstTask ? (
+          <ParentReviewSection title="Start Here preview">
+            <strong>{firstTask.owner}</strong>
+            <p>{firstTask.title}</p>
+            <small>{firstTask.duration} - {firstTask.mode}</small>
+            <p>{firstTask.reason}</p>
+          </ParentReviewSection>
+        ) : null}
+
+        {curriculum.dailyCycle.learningTasks.length > 0 ? (
+          <ParentReviewSection title="Learning sequence preview">
+            <ol>
+              {curriculum.dailyCycle.learningTasks.map((task) => (
+                <li key={task.id}>
+                  <span>{task.title}</span>
+                  <small>{task.mode} - {task.duration}</small>
+                </li>
+              ))}
+            </ol>
+          </ParentReviewSection>
+        ) : null}
+
+        {materials.length > 0 ? (
+          <ParentReviewSection title="Materials reminder">
+            <ul>
+              {materials.map((material) => <li key={material}>{material}</li>)}
+            </ul>
+          </ParentReviewSection>
+        ) : null}
+
+        {printableTasks.length > 0 ? (
+          <ParentReviewSection title="Printable student sheets">
+            <ul>
+              {printableTasks.map((task) => <li key={task.id}>{task.title}</li>)}
+            </ul>
+          </ParentReviewSection>
+        ) : null}
+
+        {curriculum.dailyCycle.prepTasks.length > 0 ? (
+          <ParentReviewSection title="Tomorrow prep preview">
+            <ul>
+              {curriculum.dailyCycle.prepTasks.map((task) => (
+                <li key={task.id}>{task.title}</li>
+              ))}
+            </ul>
+          </ParentReviewSection>
+        ) : null}
       </section>
 
-      <section className="how-this-helps" aria-labelledby="decision-engine-helps-title">
-        <h2 id="decision-engine-helps-title">What will be saved</h2>
-        <p>
-          Confirming stores the imported curriculum, explicit unknowns, continuity state,
-          and ParentDecisionV2 output. It does not invent family or learner realities.
-        </p>
-      </section>
+      {isImportDebugEnabled() ? <DebugDecisionView decision={result.decision} /> : null}
 
-      <button className="primary-action primary-action--inline" onClick={onApprove} type="button">
+      <button
+        className="primary-action primary-action--inline"
+        disabled={curriculum.dailyCycle.learningTasks.length === 0}
+        onClick={onApprove}
+        type="button"
+      >
         Save Curriculum to Daily Cycle
       </button>
     </section>
   );
 }
 
-function readinessTitle(decision: ParentDecisionV2) {
-  if (decision.readiness.status === 'ready') {
-    return 'The parent decision is ready for review.';
-  }
+function ParentReviewSection({ children, title }: { children: React.ReactNode; title: string }) {
+  return (
+    <div className="decision-engine-list">
+      <strong>{title}</strong>
+      {children}
+    </div>
+  );
+}
 
-  if (decision.readiness.status === 'limited') {
-    return 'The parent decision is available with uncertainty.';
-  }
-
-  if (decision.readiness.status === 'blocked') {
-    return 'The parent decision is blocked, but the source limitation can be saved.';
-  }
-
-  return 'No parent decision is available yet.';
+function DebugDecisionView({ decision }: { decision: ParentDecisionV2 }) {
+  return (
+    <section className="how-this-helps" aria-labelledby="debug-decision-title">
+      <h2 id="debug-decision-title">Developer Debug</h2>
+      <p>This section is hidden unless import debug mode is enabled.</p>
+      <div className="import-summary" aria-label="Debug decision summary">
+        <span>{decision.readiness.status}</span>
+        <span>{decision.confidence.level}</span>
+        <span>{decision.evidenceTraces.length} traces</span>
+      </div>
+      <SourceSummaryStatuses decision={decision} />
+      <AttentionList items={decision.attentionRequired} />
+      <ConfirmationList items={decision.confirmationsRequired} />
+      <BlockerList items={decision.blockers} />
+      <UncertaintyList items={decision.unresolvedUncertainty} />
+      <DeferredList items={decision.deferredItems} />
+    </section>
+  );
 }
 
 function SourceSummaryStatuses({ decision }: { decision: ParentDecisionV2 }) {
@@ -400,7 +485,7 @@ function AnalysisStep({ currentStepIndex, steps, title }: AnalysisStepProps) {
       <div className="loading-dot" aria-hidden="true" />
       <div>
         <h2>{title}</h2>
-        <p>Source evidence is becoming DecisionContext, ParentDecisionV2, and persisted daily-cycle data.</p>
+        <p>IterNest is reading the curriculum and preparing a parent review.</p>
       </div>
 
       <div className="analysis-progress" aria-label={`${progressPercent}% complete`}>
@@ -455,6 +540,20 @@ function formatSubsystem(subsystem: ParentDecisionV2['readiness']['sourceSummary
     .join(' ');
 }
 
+function summaryList(items: string[]) {
+  const uniqueItems = uniqueStrings(items).slice(0, 5);
+
+  if (uniqueItems.length === 0) {
+    return 'none clearly identified yet';
+  }
+
+  return uniqueItems.join(', ');
+}
+
+function uniqueStrings(items: string[]) {
+  return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
+}
+
 function wait(durationMs: number) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, durationMs);
@@ -468,6 +567,10 @@ function createImportFlowDebugTimer(scope: string) {
   let lastAt = startedAt;
 
   function log(label: string, details?: ImportFlowDebugDetails) {
+    if (!isImportDebugEnabled()) {
+      return;
+    }
+
     const now = performance.now();
     const elapsedMs = Math.round(now - startedAt);
     const deltaMs = Math.round(now - lastAt);
@@ -490,4 +593,21 @@ function createImportFlowDebugTimer(scope: string) {
       log(label, details);
     },
   };
+}
+
+function logImportDebugError(message: string, error: unknown) {
+  if (isImportDebugEnabled()) {
+    console.error(`[IterNest import] ${message}`, error);
+  }
+}
+
+function isImportDebugEnabled() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return (
+    window.localStorage.getItem('iternest-debug-import') === 'true' ||
+    new URLSearchParams(window.location.search).get('debugImport') === 'true'
+  );
 }
