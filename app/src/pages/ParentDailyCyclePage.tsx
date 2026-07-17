@@ -3,6 +3,7 @@ import { RecenterDayPanel, type RecenterOption } from '../components/RecenterDay
 import { CurriculumImportFlow } from '../features/curriculum-import/CurriculumImportFlow';
 import {
   getActiveCurriculumRecord,
+  DAILY_CYCLE_DATA_STORAGE_KEY,
   loadPersistedHomeschoolData,
   savePersistedHomeschoolData,
   setActiveCurriculumRecord,
@@ -11,6 +12,11 @@ import {
   type PersistedLearningTask,
   type PersistedPrepTask,
 } from '../features/daily-cycle/dailyCyclePersistence';
+import {
+  describeImportError,
+  reportImportProgress,
+  type ImportProgressReporter,
+} from '../features/curriculum-import/importDiagnostics';
 import '../styles/parent-home.css';
 import '../styles/daily-cycle.css';
 import { CurriculumLibraryPage } from './CurriculumLibraryPage';
@@ -162,11 +168,29 @@ export function ParentDailyCyclePage() {
   const prepTasks = activeCurriculum?.dailyCycle.prepTasks ?? [];
 
   useEffect(() => {
-    savePersistedHomeschoolData(homeschoolData);
+    try {
+      savePersistedHomeschoolData(homeschoolData);
+    } catch (error) {
+      reportImportProgress(undefined, {
+        stepId: 'effect-save-curriculum-local-storage',
+        label: 'Background curriculum storage sync failed',
+        status: 'failed',
+        error: describeImportError(error),
+      });
+    }
   }, [homeschoolData]);
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(dayState));
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(dayState));
+    } catch (error) {
+      reportImportProgress(undefined, {
+        stepId: 'effect-save-day-state-local-storage',
+        label: 'Background day-state storage sync failed',
+        status: 'failed',
+        error: describeImportError(error),
+      });
+    }
   }, [dayState]);
 
   useEffect(() => {
@@ -249,12 +273,146 @@ export function ParentDailyCyclePage() {
     setActiveView('today');
   }
 
-  function handleImportApproved(curriculum: PersistedCurriculumRecord) {
-    setHomeschoolData((current) => upsertCurriculumRecord(current, curriculum));
-    setDayState(createInitialDayState(curriculum.dailyCycle.prepTasks));
-    setSelectedTaskId(curriculum.dailyCycle.learningTasks[0]?.id ?? '');
-    setActiveView('today');
-    setIsImportFlowOpen(false);
+  async function handleImportApproved(
+    curriculum: PersistedCurriculumRecord,
+    onProgress?: ImportProgressReporter,
+  ) {
+    reportImportProgress(onProgress, {
+      stepId: 'approval-start',
+      label: 'Starting curriculum approval save',
+      status: 'started',
+      detail: {
+        curriculumId: curriculum.id,
+        learningTaskCount: curriculum.dailyCycle.learningTasks.length,
+        prepTaskCount: curriculum.dailyCycle.prepTasks.length,
+      },
+    });
+
+    let nextHomeschoolData: ReturnType<typeof upsertCurriculumRecord>;
+    let nextDayState: DayState;
+
+    try {
+      await yieldToBrowserPaint();
+      const currentData = homeschoolData;
+
+      nextHomeschoolData = runVisibleSyncStep(
+        {
+          stepId: 'upsert-curriculum-record',
+          label: 'Adding curriculum to local daily-cycle data',
+          onProgress,
+          detail: { existingCurriculumCount: currentData.curricula.length },
+        },
+        () => upsertCurriculumRecord(currentData, curriculum),
+      );
+
+      nextDayState = runVisibleSyncStep(
+        {
+          stepId: 'create-day-state',
+          label: 'Creating today state for imported curriculum',
+          onProgress,
+          detail: { prepTaskCount: curriculum.dailyCycle.prepTasks.length },
+        },
+        () => createInitialDayState(curriculum.dailyCycle.prepTasks),
+      );
+
+      await yieldToBrowserPaint();
+
+      const serializedHomeschoolData = runVisibleSyncStep(
+        {
+          stepId: 'serialize-curriculum-data',
+          label: 'Serializing curriculum data',
+          onProgress,
+          detail: {
+            curriculumCount: nextHomeschoolData.curricula.length,
+            activeCurriculumId: nextHomeschoolData.activeCurriculumId,
+          },
+        },
+        () => JSON.stringify(nextHomeschoolData),
+      );
+
+      runVisibleSyncStep(
+        {
+          stepId: 'save-curriculum-local-storage',
+          label: 'Saving curriculum data locally',
+          onProgress,
+          detail: {
+            storageKey: DAILY_CYCLE_DATA_STORAGE_KEY,
+            serializedLength: serializedHomeschoolData.length,
+          },
+        },
+        () => {
+          window.localStorage.setItem(DAILY_CYCLE_DATA_STORAGE_KEY, serializedHomeschoolData);
+        },
+      );
+
+      await yieldToBrowserPaint();
+
+      const serializedDayState = runVisibleSyncStep(
+        {
+          stepId: 'serialize-day-state',
+          label: 'Serializing today state',
+          onProgress,
+        },
+        () => JSON.stringify(nextDayState),
+      );
+
+      runVisibleSyncStep(
+        {
+          stepId: 'save-day-state-local-storage',
+          label: 'Saving today state locally',
+          onProgress,
+          detail: { storageKey: STORAGE_KEY, serializedLength: serializedDayState.length },
+        },
+        () => {
+          window.localStorage.setItem(STORAGE_KEY, serializedDayState);
+        },
+      );
+
+      await yieldToBrowserPaint();
+
+      reportImportProgress(onProgress, {
+        stepId: 'react-state-update',
+        label: 'Updating the daily-cycle screen',
+        status: 'started',
+      });
+      setHomeschoolData(nextHomeschoolData);
+      setDayState(nextDayState);
+      setSelectedTaskId(curriculum.dailyCycle.learningTasks[0]?.id ?? '');
+      setActiveView('today');
+      reportImportProgress(onProgress, {
+        stepId: 'react-state-update',
+        label: 'Updating the daily-cycle screen',
+        status: 'completed',
+      });
+
+      await yieldToBrowserPaint();
+
+      reportImportProgress(onProgress, {
+        stepId: 'navigation-after-import',
+        label: 'Returning to the daily cycle',
+        status: 'started',
+      });
+      setIsImportFlowOpen(false);
+      reportImportProgress(onProgress, {
+        stepId: 'navigation-after-import',
+        label: 'Returning to the daily cycle',
+        status: 'completed',
+      });
+
+      reportImportProgress(onProgress, {
+        stepId: 'approval-start',
+        label: 'Starting curriculum approval save',
+        status: 'completed',
+      });
+    } catch (error) {
+      reportImportProgress(onProgress, {
+        stepId: 'approval-save-error',
+        label: 'Saving curriculum approval failed',
+        status: 'failed',
+        error: describeImportError(error),
+      });
+      throw error;
+    }
   }
 
   function handleSelectCurriculum(curriculumId: string) {
@@ -1196,6 +1354,68 @@ function BottomNavigation({ activeView, onChange }: BottomNavigationProps) {
       </button>
     </nav>
   );
+}
+
+function runVisibleSyncStep<T>(
+  {
+    detail,
+    label,
+    onProgress,
+    stepId,
+  }: {
+    detail?: Record<string, unknown>;
+    label: string;
+    onProgress?: ImportProgressReporter;
+    stepId: string;
+  },
+  operation: () => T,
+) {
+  const startedAt = performance.now();
+  reportImportProgress(onProgress, {
+    stepId,
+    label,
+    status: 'started',
+    detail,
+  });
+
+  try {
+    const result = operation();
+    reportImportProgress(onProgress, {
+      stepId,
+      label,
+      status: 'completed',
+      elapsedMs: Math.round(performance.now() - startedAt),
+      detail: describeSyncStepResult(result),
+    });
+    return result;
+  } catch (error) {
+    reportImportProgress(onProgress, {
+      stepId,
+      label,
+      status: 'failed',
+      elapsedMs: Math.round(performance.now() - startedAt),
+      error: describeImportError(error),
+    });
+    throw error;
+  }
+}
+
+function describeSyncStepResult(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value === 'string') {
+    return { serializedLength: value.length };
+  }
+
+  if (value && typeof value === 'object') {
+    return { objectKeys: Object.keys(value).slice(0, 12) };
+  }
+
+  return undefined;
+}
+
+function yieldToBrowserPaint() {
+  return new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
 }
 
 

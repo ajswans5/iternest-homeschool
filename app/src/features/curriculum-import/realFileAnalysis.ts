@@ -6,6 +6,7 @@ import type {
   SourceQuestion,
   UploadedCurriculumAnalysis,
 } from './types';
+import { reportImportProgress, traceImportStep, type ImportProgressReporter } from './importDiagnostics';
 
 type ParsedLine = {
   lineNumber: number;
@@ -88,9 +89,20 @@ const sectionPatterns = [
 
 export async function analyzeUploadedCurriculumFile(
   file: File,
+  options: { onProgress?: ImportProgressReporter } = {},
 ): Promise<UploadedCurriculumAnalysis> {
-  const extraction = await extractReadableText(file);
+  const extraction = await extractReadableText(file, options.onProgress);
 
+  reportImportProgress(options.onProgress, {
+    stepId: 'curriculum-analysis',
+    label: 'Analyzing curriculum structure',
+    status: 'started',
+    detail: {
+      readableTextLength: extraction.text.length,
+      lineCount: extraction.lines.length,
+      pageCount: extraction.pageCount,
+    },
+  });
   const detectedSections = findSections(extraction.lines);
   const subjectsFound = findSubjects(extraction.lines);
   const lessonHeadingsFound = findLessonHeadings(extraction.lines);
@@ -104,6 +116,17 @@ export async function analyzeUploadedCurriculumFile(
   const inferences = buildInferences(detectedSections, subjectsFound, lessonHeadingsFound);
   const questions = buildQuestions(file, extraction, detectedSections);
   const draftBlueprint = buildDraftBlueprint(subjectsFound, lessonHeadingsFound, questions);
+  reportImportProgress(options.onProgress, {
+    stepId: 'curriculum-analysis',
+    label: 'Analyzing curriculum structure',
+    status: 'completed',
+    detail: {
+      sectionCount: detectedSections.length,
+      subjectCount: subjectsFound.length,
+      lessonHeadingCount: lessonHeadingsFound.length,
+      questionCount: questions.length,
+    },
+  });
 
   return {
     fileName: file.name,
@@ -133,7 +156,10 @@ function toSourceLine(line: ParsedLine): SourceLine {
   };
 }
 
-async function extractReadableText(file: File): Promise<TextExtractionResult> {
+async function extractReadableText(
+  file: File,
+  onProgress?: ImportProgressReporter,
+): Promise<TextExtractionResult> {
   if (file.type.startsWith('image/')) {
     return buildExtractionResult('', null, [
       'This is an image file. OCR is required before IterNest can read curriculum text from it.',
@@ -142,11 +168,21 @@ async function extractReadableText(file: File): Promise<TextExtractionResult> {
   }
 
   if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-    return extractPdfText(file);
+    return extractPdfText(file, onProgress);
   }
 
   if (file.type.startsWith('text/') || /\.(txt|md|csv)$/i.test(file.name)) {
-    return buildExtractionResult(cleanText(await file.text()), null, [
+    const text = await traceImportStep(
+      {
+        stepId: 'text-file-read',
+        label: 'Reading text file',
+        reporter: onProgress,
+        timeoutMs: 15000,
+        detail: { fileName: file.name, fileSize: file.size },
+      },
+      () => file.text(),
+    );
+    return buildExtractionResult(cleanText(text), null, [
       'Text files are accepted for developer testing, but parents should be able to upload normal curriculum PDFs.',
     ]);
   }
@@ -156,8 +192,21 @@ async function extractReadableText(file: File): Promise<TextExtractionResult> {
   ]);
 }
 
-async function extractPdfText(file: File): Promise<TextExtractionResult> {
-  const originalBytes = new Uint8Array(await file.arrayBuffer());
+async function extractPdfText(
+  file: File,
+  onProgress?: ImportProgressReporter,
+): Promise<TextExtractionResult> {
+  const fileBuffer = await traceImportStep(
+    {
+      stepId: 'pdf-file-read',
+      label: 'Reading PDF file bytes',
+      reporter: onProgress,
+      timeoutMs: 30000,
+      detail: { fileName: file.name, fileSize: file.size, fileType: file.type },
+    },
+    () => file.arrayBuffer(),
+  );
+  const originalBytes = new Uint8Array(fileBuffer);
   const attempts = [
     { label: 'Safari-compatible PDF reader', load: loadLegacyPdfJs },
     { label: 'standard PDF reader', load: loadStandardPdfJs },
@@ -167,8 +216,16 @@ async function extractPdfText(file: File): Promise<TextExtractionResult> {
 
   for (const attempt of attempts) {
     try {
-      const pdfjs = await attempt.load();
-      const result = await extractPdfTextWithReader(pdfjs, originalBytes, attempt.label);
+      const pdfjs = await traceImportStep(
+        {
+          stepId: `pdf-reader-load-${slugify(attempt.label)}`,
+          label: `Loading ${attempt.label}`,
+          reporter: onProgress,
+          timeoutMs: 30000,
+        },
+        () => attempt.load(),
+      );
+      const result = await extractPdfTextWithReader(pdfjs, originalBytes, attempt.label, onProgress);
 
       if (!bestResult || result.text.length > bestResult.text.length) {
         bestResult = result;
@@ -210,6 +267,7 @@ async function extractPdfTextWithReader(
   pdfjs: PdfJsLike,
   originalBytes: Uint8Array,
   readerLabel: string,
+  onProgress?: ImportProgressReporter,
 ): Promise<TextExtractionResult> {
   const loadingTask = pdfjs.getDocument({
     data: originalBytes.slice(),
@@ -221,18 +279,50 @@ async function extractPdfTextWithReader(
   let document: PdfDocumentLike | null = null;
 
   try {
-    document = await loadingTask.promise;
+    document = await traceImportStep(
+      {
+        stepId: `pdf-document-load-${slugify(readerLabel)}`,
+        label: `Opening PDF document with ${readerLabel}`,
+        reporter: onProgress,
+        timeoutMs: 45000,
+      },
+      () => loadingTask.promise,
+    );
     const parsedLines: ParsedLine[] = [];
     const limitations: string[] = [];
     const pageErrors: string[] = [];
     const pagesToRead = Math.min(document.numPages, INITIAL_IMPORT_PAGE_LIMIT);
+    reportImportProgress(onProgress, {
+      stepId: `pdf-page-count-${slugify(readerLabel)}`,
+      label: `PDF page count detected with ${readerLabel}`,
+      status: 'info',
+      detail: { pageCount: document.numPages, pagesToRead },
+    });
 
     for (let pageNumber = 1; pageNumber <= pagesToRead; pageNumber += 1) {
       let page: PdfPageLike | null = null;
 
       try {
-        page = await document.getPage(pageNumber);
-        const textContent = await page.getTextContent();
+        page = await traceImportStep(
+          {
+            stepId: `pdf-page-load-${slugify(readerLabel)}-${pageNumber}`,
+            label: `Loading PDF page ${pageNumber}`,
+            reporter: onProgress,
+            timeoutMs: 10000,
+            detail: { pageNumber, readerLabel },
+          },
+          () => document?.getPage(pageNumber) ?? Promise.reject(new Error('PDF document was not available.')),
+        );
+        const textContent = await traceImportStep(
+          {
+            stepId: `pdf-page-text-${slugify(readerLabel)}-${pageNumber}`,
+            label: `Reading text from PDF page ${pageNumber}`,
+            reporter: onProgress,
+            timeoutMs: 10000,
+            detail: { pageNumber, readerLabel },
+          },
+          () => page?.getTextContent() ?? Promise.reject(new Error('PDF page was not available.')),
+        );
         parsedLines.push(
           ...getPdfPageLines(textContent.items as PdfTextItem[], pageNumber),
         );
@@ -633,4 +723,13 @@ function formatFileSize(size: number) {
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function slugify(value: string) {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'unknown'
+  );
 }

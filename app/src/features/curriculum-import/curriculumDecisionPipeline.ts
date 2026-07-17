@@ -18,6 +18,7 @@ import { buildPersistedCurriculumRecord, type PersistedCurriculumRecord } from '
 import type { ParentDecisionV2 } from '../parent-decision/contracts';
 import { buildParentDecisionV2FromDecisionContext } from '../parent-decision/parentDecisionV2Engine';
 import type { SourceEvidence } from '../../domain/contracts';
+import { reportImportProgress, traceImportStep, type ImportProgressReporter } from './importDiagnostics';
 import { buildSingleLessonModel } from './lessonUnderstandingEngine';
 import { analyzeUploadedCurriculumFile } from './realFileAnalysis';
 import type { UploadedCurriculumAnalysis } from './types';
@@ -58,12 +59,23 @@ const relationshipTypes: CurriculumRepresentationRelationship['relationshipType'
 
 export async function analyzeCurriculumForParentDecision(
   file: File,
+  options: { onProgress?: ImportProgressReporter } = {},
 ): Promise<CurriculumImportDecisionResult> {
+  const onProgress = options.onProgress;
   const debug = createImportDebugTimer('analyzeCurriculumForParentDecision');
   debug.checkpoint('start', { fileName: file.name, fileSize: file.size, fileType: file.type });
 
   debug.before('await analyzeUploadedCurriculumFile(file)');
-  const sourceAnalysis = await analyzeUploadedCurriculumFile(file);
+  const sourceAnalysis = await traceImportStep(
+    {
+      stepId: 'source-analysis',
+      label: 'Reading curriculum source',
+      reporter: onProgress,
+      timeoutMs: 90000,
+      detail: { fileName: file.name, fileSize: file.size, fileType: file.type },
+    },
+    () => analyzeUploadedCurriculumFile(file, { onProgress }),
+  );
   debug.after('await analyzeUploadedCurriculumFile(file)', {
     readableTextLength: sourceAnalysis.readableTextLength,
     sourceLineCount: sourceAnalysis.sourceLines.length,
@@ -71,6 +83,11 @@ export async function analyzeCurriculumForParentDecision(
     limitationCount: sourceAnalysis.limitations.length,
   });
 
+  reportImportProgress(onProgress, {
+    stepId: 'lesson-model',
+    label: 'Building curriculum model',
+    status: 'started',
+  });
   debug.before('buildSingleLessonModel(sourceAnalysis)');
   const lessonModel = buildSingleLessonModel(sourceAnalysis);
   debug.after('buildSingleLessonModel(sourceAnalysis)', {
@@ -80,7 +97,23 @@ export async function analyzeCurriculumForParentDecision(
     studentTaskCount: lessonModel?.studentResponsibilities.length ?? 0,
     materialCount: lessonModel?.materialsRequired.length ?? 0,
   });
+  reportImportProgress(onProgress, {
+    stepId: 'lesson-model',
+    label: 'Building curriculum model',
+    status: 'completed',
+    detail: {
+      hasLessonModel: Boolean(lessonModel),
+      teacherTaskCount: lessonModel?.teacherResponsibilities.length ?? 0,
+      studentTaskCount: lessonModel?.studentResponsibilities.length ?? 0,
+      materialCount: lessonModel?.materialsRequired.length ?? 0,
+    },
+  });
 
+  reportImportProgress(onProgress, {
+    stepId: 'curriculum-reasoning-result',
+    label: 'Preparing curriculum review data',
+    status: 'started',
+  });
   debug.before('buildImportCurriculumReasoningResult(...)');
   const curriculumReasoningResult = buildImportCurriculumReasoningResult(
     sourceAnalysis,
@@ -91,14 +124,40 @@ export async function analyzeCurriculumForParentDecision(
     blockedPathCount: curriculumReasoningResult.blockedPaths.length,
     traceCount: curriculumReasoningResult.traces.length,
   });
+  reportImportProgress(onProgress, {
+    stepId: 'curriculum-reasoning-result',
+    label: 'Preparing curriculum review data',
+    status: 'completed',
+    detail: {
+      applicablePathCount: curriculumReasoningResult.applicablePaths.length,
+      blockedPathCount: curriculumReasoningResult.blockedPaths.length,
+      traceCount: curriculumReasoningResult.traces.length,
+    },
+  });
 
+  reportImportProgress(onProgress, {
+    stepId: 'curriculum-summary',
+    label: 'Summarizing curriculum findings',
+    status: 'started',
+  });
   debug.before('buildCurriculumIntelligenceSummary(curriculumReasoningResult)');
   const curriculumSummary = buildCurriculumIntelligenceSummary(curriculumReasoningResult);
   debug.after('buildCurriculumIntelligenceSummary(curriculumReasoningResult)', {
     summaryStatus: curriculumSummary.summaryStatus,
     unknownCount: curriculumSummary.unknowns.length,
   });
+  reportImportProgress(onProgress, {
+    stepId: 'curriculum-summary',
+    label: 'Summarizing curriculum findings',
+    status: 'completed',
+    detail: { summaryStatus: curriculumSummary.summaryStatus, unknownCount: curriculumSummary.unknowns.length },
+  });
 
+  reportImportProgress(onProgress, {
+    stepId: 'family-summary',
+    label: 'Checking available family context',
+    status: 'started',
+  });
   debug.before('buildFamilyUnderstandingSummary(buildFamilyUnderstandingProfile(...))');
   const familySummary = buildFamilyUnderstandingSummary(
     buildFamilyUnderstandingProfile({
@@ -111,7 +170,18 @@ export async function analyzeCurriculumForParentDecision(
     summaryStatus: familySummary.summaryStatus,
     unknownCount: familySummary.unknowns.length,
   });
+  reportImportProgress(onProgress, {
+    stepId: 'family-summary',
+    label: 'Checking available family context',
+    status: 'completed',
+    detail: { summaryStatus: familySummary.summaryStatus, unknownCount: familySummary.unknowns.length },
+  });
 
+  reportImportProgress(onProgress, {
+    stepId: 'learner-summary',
+    label: 'Checking available learner context',
+    status: 'started',
+  });
   debug.before('buildLearnerUnderstandingSummary(buildLearnerUnderstandingProfile(...))');
   const learnerSummary = buildLearnerUnderstandingSummary(
     buildLearnerUnderstandingProfile({
@@ -125,7 +195,18 @@ export async function analyzeCurriculumForParentDecision(
     summaryStatus: learnerSummary.summaryStatus,
     unknownCount: learnerSummary.unknowns.length,
   });
+  reportImportProgress(onProgress, {
+    stepId: 'learner-summary',
+    label: 'Checking available learner context',
+    status: 'completed',
+    detail: { summaryStatus: learnerSummary.summaryStatus, unknownCount: learnerSummary.unknowns.length },
+  });
 
+  reportImportProgress(onProgress, {
+    stepId: 'continuity-summary',
+    label: 'Checking prior learning context',
+    status: 'started',
+  });
   debug.before('buildLearningContinuitySummary(buildLearningContinuityProfile(...))');
   const learningContinuitySummary = buildLearningContinuitySummary(
     buildLearningContinuityProfile({
@@ -140,7 +221,21 @@ export async function analyzeCurriculumForParentDecision(
     summaryStatus: learningContinuitySummary.summaryStatus,
     unknownCount: learningContinuitySummary.unknowns.length,
   });
+  reportImportProgress(onProgress, {
+    stepId: 'continuity-summary',
+    label: 'Checking prior learning context',
+    status: 'completed',
+    detail: {
+      summaryStatus: learningContinuitySummary.summaryStatus,
+      unknownCount: learningContinuitySummary.unknowns.length,
+    },
+  });
 
+  reportImportProgress(onProgress, {
+    stepId: 'decision-context',
+    label: 'Preparing review inputs',
+    status: 'started',
+  });
   debug.before('assembleDecisionContext(...)');
   const decisionContext = assembleDecisionContext({
     id: `curriculum-import-decision-context-${slugify(sourceAnalysis.fileName)}`,
@@ -154,7 +249,22 @@ export async function analyzeCurriculumForParentDecision(
     sourceSummaryCount: decisionContext.sourceSummaries.length,
     unknownCount: decisionContext.unknowns.length,
   });
+  reportImportProgress(onProgress, {
+    stepId: 'decision-context',
+    label: 'Preparing review inputs',
+    status: 'completed',
+    detail: {
+      contextStatus: decisionContext.contextStatus,
+      sourceSummaryCount: decisionContext.sourceSummaries.length,
+      unknownCount: decisionContext.unknowns.length,
+    },
+  });
 
+  reportImportProgress(onProgress, {
+    stepId: 'parent-decision',
+    label: 'Preparing parent-facing review',
+    status: 'started',
+  });
   debug.before('buildParentDecisionV2FromDecisionContext(decisionContext)');
   const decision = buildParentDecisionV2FromDecisionContext(decisionContext);
   debug.after('buildParentDecisionV2FromDecisionContext(decisionContext)', {
@@ -162,7 +272,22 @@ export async function analyzeCurriculumForParentDecision(
     attentionCount: decision.attentionRequired.length,
     uncertaintyCount: decision.unresolvedUncertainty.length,
   });
+  reportImportProgress(onProgress, {
+    stepId: 'parent-decision',
+    label: 'Preparing parent-facing review',
+    status: 'completed',
+    detail: {
+      readiness: decision.readiness.status,
+      attentionCount: decision.attentionRequired.length,
+      uncertaintyCount: decision.unresolvedUncertainty.length,
+    },
+  });
 
+  reportImportProgress(onProgress, {
+    stepId: 'persisted-record',
+    label: 'Preparing persisted curriculum data',
+    status: 'started',
+  });
   debug.before('buildPersistedCurriculumRecord(...)');
   const curriculumRecord = buildPersistedCurriculumRecord({
     sourceAnalysis,
@@ -173,6 +298,16 @@ export async function analyzeCurriculumForParentDecision(
     curriculumRecordId: curriculumRecord.id,
     learningTaskCount: curriculumRecord.dailyCycle.learningTasks.length,
     prepTaskCount: curriculumRecord.dailyCycle.prepTasks.length,
+  });
+  reportImportProgress(onProgress, {
+    stepId: 'persisted-record',
+    label: 'Preparing persisted curriculum data',
+    status: 'completed',
+    detail: {
+      curriculumRecordId: curriculumRecord.id,
+      learningTaskCount: curriculumRecord.dailyCycle.learningTasks.length,
+      prepTaskCount: curriculumRecord.dailyCycle.prepTasks.length,
+    },
   });
 
   debug.checkpoint('returning CurriculumImportDecisionResult');

@@ -12,13 +12,22 @@ import {
   analyzeCurriculumForParentDecision,
   type CurriculumImportDecisionResult,
 } from './curriculumDecisionPipeline';
+import {
+  reportImportProgress,
+  traceImportStep,
+  type ImportDiagnosticEvent,
+  type ImportProgressReporter,
+} from './importDiagnostics';
 import type { CurriculumImportFile } from './types';
 
-type ImportStep = 'start' | 'upload' | 'analyzing-source' | 'parent-review' | 'approved';
+type ImportStep = 'start' | 'upload' | 'analyzing-source' | 'parent-review' | 'saving' | 'approved';
 
 type CurriculumImportFlowProps = {
   onCancel: () => void;
-  onApprove: (curriculum: PersistedCurriculumRecord) => void;
+  onApprove: (
+    curriculum: PersistedCurriculumRecord,
+    onProgress?: ImportProgressReporter,
+  ) => void | Promise<void>;
 };
 
 const parentReviewProgressSteps = [
@@ -39,6 +48,7 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
   const [analysisResult, setAnalysisResult] = useState<CurriculumImportDecisionResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [currentAnalysisStepIndex, setCurrentAnalysisStepIndex] = useState(0);
+  const [diagnosticEvents, setDiagnosticEvents] = useState<ImportDiagnosticEvent[]>([]);
 
   useEffect(() => {
     if (step !== 'analyzing-source') {
@@ -64,12 +74,14 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
       setUploadedFile(null);
       setAnalysisResult(null);
       setAnalysisError(null);
+      setDiagnosticEvents([]);
       return;
     }
 
     setUploadedFile(file);
     setAnalysisResult(null);
     setAnalysisError(null);
+    setDiagnosticEvents([]);
     setSelectedFile({
       name: file.name,
       type: file.type || 'Unknown file type',
@@ -89,16 +101,49 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
       fileType: uploadedFile.type,
     });
 
+    const handleImportProgress: ImportProgressReporter = (event) => {
+      setDiagnosticEvents((current) => [...current, event].slice(-160));
+    };
+
     debug.before('setCurrentAnalysisStepIndex(0), clear state, setStep(analyzing-source)');
     setCurrentAnalysisStepIndex(0);
     setAnalysisResult(null);
     setAnalysisError(null);
+    setDiagnosticEvents([]);
     setStep('analyzing-source');
     debug.after('setCurrentAnalysisStepIndex(0), clear state, setStep(analyzing-source)');
 
     try {
+      reportImportProgress(handleImportProgress, {
+        stepId: 'browser-environment',
+        label: 'Checking browser import environment',
+        status: 'info',
+        detail: getBrowserImportDiagnostics(uploadedFile),
+      });
+
+      if (navigator.storage?.estimate) {
+        await traceImportStep(
+          {
+            stepId: 'browser-storage-estimate',
+            label: 'Checking browser storage estimate',
+            reporter: handleImportProgress,
+            timeoutMs: 5000,
+          },
+          () => navigator.storage.estimate(),
+        );
+      } else {
+        reportImportProgress(handleImportProgress, {
+          stepId: 'browser-storage-estimate',
+          label: 'Checking browser storage estimate',
+          status: 'info',
+          detail: { supported: false },
+        });
+      }
+
       debug.before('create analysisPromise');
-      const analysisPromise = analyzeCurriculumForParentDecision(uploadedFile).then((result) => {
+      const analysisPromise = analyzeCurriculumForParentDecision(uploadedFile, {
+        onProgress: handleImportProgress,
+      }).then((result) => {
         debug.after('analysisPromise resolved', {
           curriculumRecordId: result.curriculumRecord.id,
           learningTaskCount: result.curriculumRecord.dailyCycle.learningTasks.length,
@@ -135,7 +180,7 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
     }
   }
 
-  function handleApproveParentReview() {
+  async function handleApproveParentReview() {
     const debug = createImportFlowDebugTimer('CurriculumImportFlow.handleApproveParentReview');
     debug.checkpoint('approval handler invoked', { hasAnalysisResult: Boolean(analysisResult) });
 
@@ -144,13 +189,30 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
       return;
     }
 
-    debug.before('onApprove(analysisResult.curriculumRecord)');
-    onApprove(analysisResult.curriculumRecord);
-    debug.after('onApprove(analysisResult.curriculumRecord)');
+    const handleImportProgress: ImportProgressReporter = (event) => {
+      setDiagnosticEvents((current) => [...current, event].slice(-160));
+    };
 
-    debug.before("setStep('approved')");
-    setStep('approved');
-    debug.after("setStep('approved')");
+    setStep('saving');
+
+    try {
+      debug.before('onApprove(analysisResult.curriculumRecord)');
+      await onApprove(analysisResult.curriculumRecord, handleImportProgress);
+      debug.after('onApprove(analysisResult.curriculumRecord)');
+
+      debug.before("setStep('approved')");
+      setStep('approved');
+      debug.after("setStep('approved')");
+    } catch (error) {
+      reportImportProgress(handleImportProgress, {
+        stepId: 'approval-save',
+        label: 'Saving curriculum approval',
+        status: 'failed',
+        error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+      });
+      setAnalysisError('The curriculum review completed, but saving it locally failed. The diagnostic log shows the exact failed step.');
+      setStep('parent-review');
+    }
   }
 
   return (
@@ -210,14 +272,25 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
       {step === 'analyzing-source' ? (
         <AnalysisStep
           currentStepIndex={currentAnalysisStepIndex}
+          diagnosticEvents={diagnosticEvents}
           steps={parentReviewProgressSteps}
           title="Preparing your curriculum review"
+        />
+      ) : null}
+
+      {step === 'saving' ? (
+        <AnalysisStep
+          currentStepIndex={parentReviewProgressSteps.length - 1}
+          diagnosticEvents={diagnosticEvents}
+          steps={parentReviewProgressSteps}
+          title="Saving this curriculum locally"
         />
       ) : null}
 
       {step === 'parent-review' ? (
         <CurriculumParentReview
           analysisError={analysisError}
+          diagnosticEvents={diagnosticEvents}
           result={analysisResult}
           onApprove={handleApproveParentReview}
         />
@@ -242,17 +315,19 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
 
 type CurriculumParentReviewProps = {
   analysisError: string | null;
+  diagnosticEvents: ImportDiagnosticEvent[];
   result: CurriculumImportDecisionResult | null;
   onApprove: () => void;
 };
 
-function CurriculumParentReview({ analysisError, result, onApprove }: CurriculumParentReviewProps) {
+function CurriculumParentReview({ analysisError, diagnosticEvents, result, onApprove }: CurriculumParentReviewProps) {
   if (analysisError) {
     return (
       <section className="decision-engine-card">
         <p className="section-label">Curriculum Review</p>
         <h2>This file needs more help before IterNest can use it.</h2>
         <p>{analysisError}</p>
+        <ImportDiagnosticLog events={diagnosticEvents} />
       </section>
     );
   }
@@ -263,6 +338,7 @@ function CurriculumParentReview({ analysisError, result, onApprove }: Curriculum
         <p className="section-label">Curriculum Review</p>
         <h2>No review is ready yet.</h2>
         <p>Choose a curriculum file and run analysis first.</p>
+        <ImportDiagnosticLog events={diagnosticEvents} />
       </section>
     );
   }
@@ -361,6 +437,7 @@ function CurriculumParentReview({ analysisError, result, onApprove }: Curriculum
       </section>
 
       {isImportDebugEnabled() ? <DebugDecisionView decision={result.decision} /> : null}
+      <ImportDiagnosticLog events={diagnosticEvents} />
 
       <button
         className="primary-action primary-action--inline"
@@ -473,19 +550,23 @@ function DecisionList({
 
 type AnalysisStepProps = {
   currentStepIndex: number;
+  diagnosticEvents: ImportDiagnosticEvent[];
   steps: string[];
   title: string;
 };
 
-function AnalysisStep({ currentStepIndex, steps, title }: AnalysisStepProps) {
+function AnalysisStep({ currentStepIndex, diagnosticEvents, steps, title }: AnalysisStepProps) {
   const progressPercent = Math.round(((currentStepIndex + 1) / steps.length) * 100);
+  const latestRunningEvent = [...diagnosticEvents].reverse().find((event) => event.status === 'started');
+  const latestEvent = diagnosticEvents[diagnosticEvents.length - 1] ?? null;
+  const currentLabel = latestRunningEvent?.label ?? latestEvent?.label ?? steps[currentStepIndex] ?? 'Preparing import...';
 
   return (
     <section className="import-card import-card--centered analysis-card" aria-live="polite">
       <div className="loading-dot" aria-hidden="true" />
       <div>
         <h2>{title}</h2>
-        <p>IterNest is reading the curriculum and preparing a parent review.</p>
+        <p>{currentLabel}</p>
       </div>
 
       <div className="analysis-progress" aria-label={`${progressPercent}% complete`}>
@@ -496,19 +577,92 @@ function AnalysisStep({ currentStepIndex, steps, title }: AnalysisStepProps) {
       </div>
 
       <ol className="analysis-steps">
-        {steps.map((analysisStep, index) => {
+        {(diagnosticEvents.length > 0 ? diagnosticEvents : steps.map((label, index) => ({
+          stepId: `fallback-${index}`,
+          label,
+          status: index < currentStepIndex ? 'completed' : index === currentStepIndex ? 'started' : 'info',
+          timestamp: new Date().toISOString(),
+        } satisfies ImportDiagnosticEvent))).map((analysisStep, index) => {
           const state = index < currentStepIndex ? 'complete' : index === currentStepIndex ? 'current' : 'upcoming';
+          const diagnosticState = statusToAnalysisState(analysisStep.status, state);
 
           return (
-            <li className={`analysis-step analysis-step--${state}`} key={analysisStep}>
+            <li className={`analysis-step analysis-step--${diagnosticState}`} key={`${analysisStep.stepId}-${index}`}>
               <span aria-hidden="true" />
-              {analysisStep}
+              <div>
+                <strong>{analysisStep.label}</strong>
+                <small>
+                  {formatDiagnosticStatus(analysisStep)}
+                </small>
+              </div>
             </li>
           );
         })}
       </ol>
     </section>
   );
+}
+
+function ImportDiagnosticLog({ events }: { events: ImportDiagnosticEvent[] }) {
+  if (events.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="decision-engine-list" aria-label="Import diagnostic progress">
+      <strong>Import progress log</strong>
+      <ol>
+        {events.slice(-80).map((event, index) => (
+          <li key={`${event.stepId}-${event.timestamp}-${index}`}>
+            <span>{event.label}</span>
+            <small>{formatDiagnosticStatus(event)}</small>
+            {event.error ? <small>{event.error}</small> : null}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function formatDiagnosticStatus(event: ImportDiagnosticEvent) {
+  const elapsed = typeof event.elapsedMs === 'number' ? ` (${event.elapsedMs}ms)` : '';
+
+  if (event.status === 'completed') return `✓ complete${elapsed}`;
+  if (event.status === 'failed') return `failed${elapsed}`;
+  if (event.status === 'timed-out') return `timed out${elapsed}`;
+  if (event.status === 'started') return 'running...';
+  return 'noted';
+}
+
+function statusToAnalysisState(status: ImportDiagnosticEvent['status'], fallback: string) {
+  if (status === 'completed') return 'complete';
+  if (status === 'failed' || status === 'timed-out') return 'current';
+  if (status === 'started') return 'current';
+  return fallback;
+}
+
+function getBrowserImportDiagnostics(file: File) {
+  return {
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints,
+    fileName: file.name,
+    fileType: file.type,
+    fileSize: file.size,
+    localStorageAvailable: isLocalStorageAvailable(),
+    pdfWorkerLikelyRequired: file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'),
+  };
+}
+
+function isLocalStorageAvailable() {
+  try {
+    const key = 'iternest-import-storage-test';
+    window.localStorage.setItem(key, '1');
+    window.localStorage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 type ImportPreviewProps = {
