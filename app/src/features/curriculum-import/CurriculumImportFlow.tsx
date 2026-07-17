@@ -1,45 +1,44 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
+import type { PersistedCurriculumRecord } from '../daily-cycle/dailyCyclePersistence';
 import type {
-  LearnerContext,
-  ParentDecision,
-  ParentDecisionItem,
-  ParentTeachingAction,
-} from '../../domain/contracts';
-import { analyzeCurriculumForParentDecision } from './curriculumDecisionPipeline';
-import type { ApprovedLesson, CurriculumImportFile } from './types';
+  ParentDecisionV2,
+  ParentDecisionV2AttentionItem,
+  ParentDecisionV2Blocker,
+  ParentDecisionV2ConfirmationItem,
+  ParentDecisionV2DeferredItem,
+  ParentDecisionV2UncertaintyItem,
+} from '../parent-decision/contracts';
+import {
+  analyzeCurriculumForParentDecision,
+  type CurriculumImportDecisionResult,
+} from './curriculumDecisionPipeline';
+import type { CurriculumImportFile } from './types';
 
-type ImportStep =
-  | 'start'
-  | 'upload'
-  | 'analyzing-source'
-  | 'parent-decision'
-  | 'approved';
+type ImportStep = 'start' | 'upload' | 'analyzing-source' | 'parent-decision' | 'approved';
 
 type CurriculumImportFlowProps = {
   onCancel: () => void;
-  onApprove: (lessons: ApprovedLesson[]) => void;
+  onApprove: (curriculum: PersistedCurriculumRecord) => void;
 };
 
 const parentDecisionProgressSteps = [
   'Reading source evidence...',
-  'Building one Lesson Model...',
-  'Checking confidence and unknowns...',
-  'Asking the Decision Engine what to surface...',
-  'Preparing the parent decision...',
+  'Building curriculum intelligence summary...',
+  'Assembling decision context...',
+  'Running ParentDecisionV2...',
+  'Preparing the daily-cycle record...',
 ];
 
 const analysisStepDurationMs = 500;
 const minimumAnalysisDurationMs = parentDecisionProgressSteps.length * analysisStepDurationMs;
 
-export function CurriculumImportFlow({ onCancel }: CurriculumImportFlowProps) {
+export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFlowProps) {
   const [step, setStep] = useState<ImportStep>('start');
   const [selectedFile, setSelectedFile] = useState<CurriculumImportFile | null>(null);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [parentDecision, setParentDecision] = useState<ParentDecision | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<CurriculumImportDecisionResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [currentAnalysisStepIndex, setCurrentAnalysisStepIndex] = useState(0);
-
-  const learnerContext = useMemo(() => buildPrototypeLearnerContext(), []);
 
   useEffect(() => {
     if (step !== 'analyzing-source') {
@@ -63,13 +62,13 @@ export function CurriculumImportFlow({ onCancel }: CurriculumImportFlowProps) {
     if (!file) {
       setSelectedFile(null);
       setUploadedFile(null);
-      setParentDecision(null);
+      setAnalysisResult(null);
       setAnalysisError(null);
       return;
     }
 
     setUploadedFile(file);
-    setParentDecision(null);
+    setAnalysisResult(null);
     setAnalysisError(null);
     setSelectedFile({
       name: file.name,
@@ -84,27 +83,32 @@ export function CurriculumImportFlow({ onCancel }: CurriculumImportFlowProps) {
     }
 
     setCurrentAnalysisStepIndex(0);
-    setParentDecision(null);
+    setAnalysisResult(null);
     setAnalysisError(null);
     setStep('analyzing-source');
 
     try {
-      const [decision] = await Promise.all([
-        analyzeCurriculumForParentDecision(uploadedFile, learnerContext),
+      const [result] = await Promise.all([
+        analyzeCurriculumForParentDecision(uploadedFile),
         wait(minimumAnalysisDurationMs),
       ]);
 
-      setParentDecision(decision);
+      setAnalysisResult(result);
       setStep('parent-decision');
     } catch {
       setAnalysisError(
-        'IterNest could not safely inspect this file in the browser. If this is a scanned curriculum PDF or photo, OCR is required before IterNest can build a reliable Lesson Model.',
+        'IterNest could not safely inspect this file in the browser. If this is a scanned curriculum PDF or photo, OCR is required before IterNest can build a reliable Decision Context.',
       );
       setStep('parent-decision');
     }
   }
 
   function handleApproveParentDecision() {
+    if (!analysisResult) {
+      return;
+    }
+
+    onApprove(analysisResult.curriculumRecord);
     setStep('approved');
   }
 
@@ -112,13 +116,13 @@ export function CurriculumImportFlow({ onCancel }: CurriculumImportFlowProps) {
     <main className="import-shell">
       <header className="import-header">
         <button className="text-button" onClick={onCancel} type="button">
-          Back to dashboard
+          Back to daily cycle
         </button>
         <p className="section-label">Curriculum Import</p>
-        <h1>Let the Decision Engine decide what the parent sees.</h1>
+        <h1>Import curriculum into the daily cycle.</h1>
         <p>
-          The parser produces a Lesson Model. The Decision Engine combines that model
-          with learner context and surfaces only the parent decision needed right now.
+          IterNest reads the source, preserves uncertainty, builds a ParentDecisionV2 result,
+          and stores the approved curriculum as the active daily-cycle source.
         </p>
       </header>
 
@@ -126,8 +130,8 @@ export function CurriculumImportFlow({ onCancel }: CurriculumImportFlowProps) {
         <section className="import-card">
           <h2>Start with a curriculum PDF</h2>
           <p>
-            IterNest will read the source, build one Lesson Model, and ask the Decision
-            Engine what needs parent attention before anything is scheduled.
+            Uploading a different curriculum creates a different Start Here task, sequence,
+            materials reminder, printable student sheet, and tomorrow-prep list.
           </p>
           <button className="primary-action primary-action--inline" onClick={() => setStep('upload')} type="button">
             Import Curriculum
@@ -172,21 +176,21 @@ export function CurriculumImportFlow({ onCancel }: CurriculumImportFlowProps) {
       {step === 'parent-decision' ? (
         <ParentDecisionView
           analysisError={analysisError}
-          decision={parentDecision}
+          decision={analysisResult?.decision ?? null}
           onApprove={handleApproveParentDecision}
         />
       ) : null}
 
       {step === 'approved' ? (
         <section className="import-card">
-          <p className="section-label">Decision Confirmed</p>
-          <h2>This parent decision has been confirmed.</h2>
+          <p className="section-label">Curriculum Saved</p>
+          <h2>This curriculum is now the active daily-cycle source.</h2>
           <p>
-            No schedule or dashboard items were created. This confirms the current
-            parent-facing decision only.
+            The daily-cycle UI will read from the persisted curriculum record, its continuity state,
+            and the ParentDecisionV2 data generated during import.
           </p>
           <button className="primary-action primary-action--inline" onClick={onCancel} type="button">
-            Return to dashboard
+            Return to daily cycle
           </button>
         </section>
       ) : null}
@@ -196,7 +200,7 @@ export function CurriculumImportFlow({ onCancel }: CurriculumImportFlowProps) {
 
 type ParentDecisionViewProps = {
   analysisError: string | null;
-  decision: ParentDecision | null;
+  decision: ParentDecisionV2 | null;
   onApprove: () => void;
 };
 
@@ -204,7 +208,7 @@ function ParentDecisionView({ analysisError, decision, onApprove }: ParentDecisi
   if (analysisError) {
     return (
       <section className="decision-engine-card">
-        <p className="section-label">Decision Engine</p>
+        <p className="section-label">ParentDecisionV2</p>
         <h2>I don't have enough evidence to determine this.</h2>
         <p>{analysisError}</p>
       </section>
@@ -214,7 +218,7 @@ function ParentDecisionView({ analysisError, decision, onApprove }: ParentDecisi
   if (!decision) {
     return (
       <section className="decision-engine-card">
-        <p className="section-label">Decision Engine</p>
+        <p className="section-label">ParentDecisionV2</p>
         <h2>I don't have enough evidence to determine this.</h2>
         <p>The curriculum analysis did not produce a parent decision yet.</p>
       </section>
@@ -224,35 +228,120 @@ function ParentDecisionView({ analysisError, decision, onApprove }: ParentDecisi
   return (
     <section className="import-review">
       <section className="decision-engine-card">
-        <p className="section-label">ParentDecision</p>
-        <h2>{decision.headline}</h2>
-        <p>{decision.summary}</p>
+        <p className="section-label">ParentDecisionV2</p>
+        <h2>{readinessTitle(decision)}</h2>
+        <p>{decision.readiness.rationale}</p>
 
         <div className="import-summary" aria-label="Decision summary">
-          <span>{decision.stage}</span>
-          <span>{decision.confidence}</span>
-          <span>{decision.approvalRequired ? 'Approval required' : 'No approval available'}</span>
+          <span>{decision.readiness.status}</span>
+          <span>{decision.confidence.level}</span>
+          <span>{decision.evidenceTraces.length} evidence traces</span>
         </div>
 
-        <DecisionList decisions={decision.decisionsRequiredNow} />
-        <TeachingActionList actions={decision.teachingActionsToSurface} />
-        <StagedForLaterList stagedForLater={decision.stagedForLater} />
+        <SourceSummaryStatuses decision={decision} />
+        <AttentionList items={decision.attentionRequired} />
+        <ConfirmationList items={decision.confirmationsRequired} />
+        <BlockerList items={decision.blockers} />
+        <UncertaintyList items={decision.unresolvedUncertainty} />
+        <DeferredList items={decision.deferredItems} />
       </section>
 
       <section className="how-this-helps" aria-labelledby="decision-engine-helps-title">
-        <h2 id="decision-engine-helps-title">How This Helps</h2>
-        <p>{decision.approvalMeaning}</p>
+        <h2 id="decision-engine-helps-title">What will be saved</h2>
+        <p>
+          Confirming stores the imported curriculum, explicit unknowns, continuity state,
+          and ParentDecisionV2 output. It does not invent family or learner realities.
+        </p>
       </section>
 
-      <button
-        className="primary-action primary-action--inline"
-        disabled={!decision.approvalRequired || decision.stage === 'blocked-needs-parent-review'}
-        onClick={onApprove}
-        type="button"
-      >
-        Confirm Parent Decision
+      <button className="primary-action primary-action--inline" onClick={onApprove} type="button">
+        Save Curriculum to Daily Cycle
       </button>
     </section>
+  );
+}
+
+function readinessTitle(decision: ParentDecisionV2) {
+  if (decision.readiness.status === 'ready') {
+    return 'The parent decision is ready for review.';
+  }
+
+  if (decision.readiness.status === 'limited') {
+    return 'The parent decision is available with uncertainty.';
+  }
+
+  if (decision.readiness.status === 'blocked') {
+    return 'The parent decision is blocked, but the source limitation can be saved.';
+  }
+
+  return 'No parent decision is available yet.';
+}
+
+function SourceSummaryStatuses({ decision }: { decision: ParentDecisionV2 }) {
+  return (
+    <div className="decision-engine-list">
+      <strong>Source summaries</strong>
+      <ul>
+        {decision.readiness.sourceSummaryStatuses.map((summary) => (
+          <li key={summary.subsystem}>
+            <span>{formatSubsystem(summary.subsystem)}</span>
+            <small>{summary.status}</small>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function AttentionList({ items }: { items: ParentDecisionV2AttentionItem[] }) {
+  if (items.length === 0) return null;
+
+  return <DecisionList title="Needs attention" items={items.map((item) => ({ id: item.id, label: item.label, detail: item.reason }))} />;
+}
+
+function ConfirmationList({ items }: { items: ParentDecisionV2ConfirmationItem[] }) {
+  if (items.length === 0) return null;
+
+  return <DecisionList title="Confirmations required" items={items.map((item) => ({ id: item.id, label: item.prompt, detail: item.reason }))} />;
+}
+
+function BlockerList({ items }: { items: ParentDecisionV2Blocker[] }) {
+  if (items.length === 0) return null;
+
+  return <DecisionList title="Blockers" items={items.map((item) => ({ id: item.id, label: item.label, detail: item.reason }))} />;
+}
+
+function UncertaintyList({ items }: { items: ParentDecisionV2UncertaintyItem[] }) {
+  if (items.length === 0) return null;
+
+  return <DecisionList title="Unresolved uncertainty" items={items.map((item) => ({ id: item.id, label: item.question, detail: item.reason }))} />;
+}
+
+function DeferredList({ items }: { items: ParentDecisionV2DeferredItem[] }) {
+  if (items.length === 0) return null;
+
+  return <DecisionList title="Deferred by ParentDecisionV2" items={items.map((item) => ({ id: item.id, label: formatSubsystem(item.subsystem), detail: item.reason }))} />;
+}
+
+function DecisionList({
+  items,
+  title,
+}: {
+  items: Array<{ id: string; label: string; detail: string }>;
+  title: string;
+}) {
+  return (
+    <div className="decision-engine-list">
+      <strong>{title}</strong>
+      <ul>
+        {items.map((item) => (
+          <li key={item.id}>
+            <span>{item.label}</span>
+            <small>{item.detail}</small>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -270,7 +359,7 @@ function AnalysisStep({ currentStepIndex, steps, title }: AnalysisStepProps) {
       <div className="loading-dot" aria-hidden="true" />
       <div>
         <h2>{title}</h2>
-        <p>Parser output is becoming a Lesson Model, then a ParentDecision.</p>
+        <p>Source evidence is becoming DecisionContext, ParentDecisionV2, and persisted daily-cycle data.</p>
       </div>
 
       <div className="analysis-progress" aria-label={`${progressPercent}% complete`}>
@@ -282,12 +371,7 @@ function AnalysisStep({ currentStepIndex, steps, title }: AnalysisStepProps) {
 
       <ol className="analysis-steps">
         {steps.map((analysisStep, index) => {
-          const state =
-            index < currentStepIndex
-              ? 'complete'
-              : index === currentStepIndex
-                ? 'current'
-                : 'upcoming';
+          const state = index < currentStepIndex ? 'complete' : index === currentStepIndex ? 'current' : 'upcoming';
 
           return (
             <li className={`analysis-step analysis-step--${state}`} key={analysisStep}>
@@ -323,91 +407,15 @@ function ImportPreview({ file }: ImportPreviewProps) {
   );
 }
 
-function DecisionList({ decisions }: { decisions: ParentDecisionItem[] }) {
-  if (decisions.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="decision-engine-list">
-      <strong>Current parent decisions</strong>
-      <ul>
-        {decisions.map((decision) => (
-          <li key={decision.id}>
-            <span>{decision.prompt}</span>
-            <small>{decision.whyNow}</small>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function TeachingActionList({ actions }: { actions: ParentTeachingAction[] }) {
-  if (actions.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="decision-engine-list">
-      <strong>Teaching actions surfaced now</strong>
-      <ul>
-        {actions.map((action) => (
-          <li key={action.id}>
-            <span>{action.label}</span>
-            <small>
-              {action.actionType} - {action.confidence}
-              {action.evidence[0] ? ` - ${action.evidence[0].sourceLocation}` : ''}
-            </small>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function StagedForLaterList({
-  stagedForLater,
-}: {
-  stagedForLater: ParentDecision['stagedForLater'];
-}) {
-  if (stagedForLater.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="decision-engine-list">
-      <strong>Staged for later</strong>
-      <ul>
-        {stagedForLater.map((item) => (
-          <li key={item.id}>
-            <span>{item.lessonModelId ?? item.id}</span>
-            <small>{item.reason}</small>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
+function formatSubsystem(subsystem: ParentDecisionV2['readiness']['sourceSummaryStatuses'][number]['subsystem']) {
+  return subsystem
+    .split('-')
+    .map((word) => word[0].toUpperCase() + word.slice(1))
+    .join(' ');
 }
 
 function wait(durationMs: number) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, durationMs);
   });
-}
-
-function buildPrototypeLearnerContext(): LearnerContext {
-  return {
-    learnerId: 'prototype-learner',
-    displayName: 'Prototype Learner',
-    currentDate: new Date().toISOString().slice(0, 10),
-    currentIndependenceLevel: 'shared-work',
-    currentCapacity: 'typical',
-    availableInstructionMinutes: null,
-    parentCapacity: 'typical',
-    recentSignals: [],
-    supportNeeds: [],
-    growthOpportunities: [],
-    parentNotes: ['Prototype context until learner profiles are implemented.'],
-  };
 }

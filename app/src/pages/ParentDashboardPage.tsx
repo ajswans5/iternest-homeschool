@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { RecenterDayPanel, type RecenterOption } from '../components/RecenterDayPanel';
 import { CurriculumImportFlow } from '../features/curriculum-import/CurriculumImportFlow';
 import type { ApprovedLesson } from '../features/curriculum-import/types';
@@ -58,7 +58,7 @@ const planTasks: PlanTask[] = [
     reason: "Jack's independent work creates a clear teaching window for Remi.",
     description:
       'Teach the short grammar lesson, complete the oral practice together, and mark the lesson ready for review.',
-    materials: ['Grammar teacher guide', 'Remi’s workbook', 'Pencil'],
+    materials: ['Grammar teacher guide', 'Remiâ€™s workbook', 'Pencil'],
     steps: [
       'Read the lesson explanation together.',
       'Complete the oral examples.',
@@ -71,7 +71,7 @@ const planTasks: PlanTask[] = [
 const tomorrowPrep = {
   title: 'Print spelling quiz',
   duration: '2 minutes',
-  detail: 'Print it after today’s lessons so tomorrow begins ready instead of with another setup task.',
+  detail: 'Print it after todayâ€™s lessons so tomorrow begins ready instead of with another setup task.',
 };
 
 const recenterOptions: RecenterOption[] = [
@@ -83,7 +83,7 @@ const recenterOptions: RecenterOption[] = [
   {
     label: 'We have less time today',
     description: 'Protect the essential lesson and move flexible learning work aside.',
-    result: 'Remi’s grammar lesson stays visible. Flexible independent work can move to tomorrow.',
+    result: 'Remiâ€™s grammar lesson stays visible. Flexible independent work can move to tomorrow.',
   },
   {
     label: 'Someone needs a smaller start',
@@ -206,7 +206,7 @@ export function ParentDashboardPage() {
   if (isImportFlowOpen) {
     return (
       <CurriculumImportFlow
-        onApprove={(lessons) => setApprovedImportedLessons(lessons)}
+        onApprove={() => setApprovedImportedLessons([])}
         onCancel={() => setIsImportFlowOpen(false)}
       />
     );
@@ -362,11 +362,11 @@ function TodayView({
       <section className="today-intro" aria-labelledby="today-title">
         <p className="eyebrow">Good morning</p>
         <h1 id="today-title">
-          {isComplete ? 'Today’s learning block is complete.' : 'Your first move is ready.'}
+          {isComplete ? 'Todayâ€™s learning block is complete.' : 'Your first move is ready.'}
         </h1>
         <p>
           {isComplete
-            ? 'Learning is finished. Tomorrow’s preparation is separated below so it does not interrupt today’s teaching flow.'
+            ? 'Learning is finished. Tomorrowâ€™s preparation is separated below so it does not interrupt todayâ€™s teaching flow.'
             : 'One clear starting point, followed by the next learning action that needs you.'}
         </p>
       </section>
@@ -414,12 +414,12 @@ function TodayView({
           </div>
           <button onClick={() => onOpenTask(currentTask.id)} type="button">
             Open {currentTask.owner}
-            <span aria-hidden="true">→</span>
+            <span aria-hidden="true">â†’</span>
           </button>
         </section>
       ) : (
         <section className="complete-card" aria-live="polite">
-          <span className="complete-card__check" aria-hidden="true">✓</span>
+          <span className="complete-card__check" aria-hidden="true">âœ“</span>
           <div>
             <p className="eyebrow">Learning finished</p>
             <h2>The active school-day sequence is complete.</h2>
@@ -438,7 +438,7 @@ function TodayView({
       <section className="day-sequence" aria-labelledby="sequence-title">
         <div className="section-heading-row">
           <div>
-            <p className="eyebrow">Today’s learning order</p>
+            <p className="eyebrow">Todayâ€™s learning order</p>
             <h2 id="sequence-title">Then what?</h2>
           </div>
           <span>{planTasks.length} steps</span>
@@ -456,12 +456,12 @@ function TodayView({
               >
                 <button onClick={() => onOpenTask(task.id)} type="button">
                   <span className="sequence-list__marker" aria-hidden="true">
-                    {isTaskComplete ? '✓' : index + 1}
+                    {isTaskComplete ? 'âœ“' : index + 1}
                   </span>
                   <span className="sequence-list__copy">
                     <small>{task.owner}</small>
                     <strong>{task.title}</strong>
-                    <span>{task.duration} · {task.mode}</span>
+                    <span>{task.duration} Â· {task.mode}</span>
                   </span>
                   <span className="sequence-list__status">
                     {isTaskComplete ? 'Done' : isCurrent ? 'Now' : 'Later'}
@@ -487,12 +487,12 @@ function TodayView({
             <li className={tomorrowPrepComplete ? 'is-complete' : 'is-current'}>
               <button onClick={onToggleTomorrowPrep} type="button">
                 <span className="sequence-list__marker" aria-hidden="true">
-                  {tomorrowPrepComplete ? '✓' : '1'}
+                  {tomorrowPrepComplete ? 'âœ“' : '1'}
                 </span>
                 <span className="sequence-list__copy">
                   <small>Tomorrow prep</small>
                   <strong>{tomorrowPrep.title}</strong>
-                  <span>{tomorrowPrep.duration} · {tomorrowPrep.detail}</span>
+                  <span>{tomorrowPrep.duration} Â· {tomorrowPrep.detail}</span>
                 </span>
                 <span className="sequence-list__status">
                   {tomorrowPrepComplete ? 'Ready' : 'Prep'}
@@ -509,7 +509,7 @@ function TodayView({
         type="button"
       >
         <span className="attention-strip__icon" aria-hidden="true">
-          {approvalStatus === 'pending' ? '!' : '✓'}
+          {approvalStatus === 'pending' ? '!' : 'âœ“'}
         </span>
         <span>
           <small>Needs your attention</small>
@@ -518,7 +518,7 @@ function TodayView({
               ? 'Approve catch-up recommendation'
               : approvalStatus === 'approved'
                 ? 'Catch-up recommendation approved'
-                : 'Today’s original plan kept'}
+                : 'Todayâ€™s original plan kept'}
           </strong>
           <span>
             {approvalStatus === 'pending'
@@ -526,7 +526,7 @@ function TodayView({
               : 'Open to review or change the decision.'}
           </span>
         </span>
-        <span aria-hidden="true">→</span>
+        <span aria-hidden="true">â†’</span>
       </button>
     </div>
   );
@@ -555,7 +555,7 @@ function TaskView({
 }: TaskViewProps) {
   return (
     <div className="view-shell detail-view">
-      <button className="back-button" onClick={onBack} type="button">← Back to today</button>
+      <button className="back-button" onClick={onBack} type="button">â† Back to today</button>
 
       <section className="task-heading">
         <div className="task-heading__meta">
@@ -592,13 +592,13 @@ function TaskView({
 
       {isComplete ? (
         <section className="task-complete-panel" aria-live="polite">
-          <span aria-hidden="true">✓</span>
+          <span aria-hidden="true">âœ“</span>
           <div>
             <p className="eyebrow">Complete</p>
             <h2>{task.completionLabel}</h2>
             <p>
               {nextTask
-                ? `Next: ${nextTask.owner} — ${nextTask.title}.`
+                ? `Next: ${nextTask.owner} â€” ${nextTask.title}.`
                 : 'That finishes the active learning sequence.'}
             </p>
           </div>
@@ -639,7 +639,7 @@ function ApprovalView({
 
   return (
     <div className="view-shell detail-view">
-      <button className="back-button" onClick={onBack} type="button">← Back to today</button>
+      <button className="back-button" onClick={onBack} type="button">â† Back to today</button>
 
       <section className="approval-heading">
         <p className="eyebrow">Needs your attention</p>
@@ -649,13 +649,13 @@ function ApprovalView({
 
       {hasDecision ? (
         <section className={`decision-result decision-result--${status}`} aria-live="polite">
-          <span aria-hidden="true">✓</span>
+          <span aria-hidden="true">âœ“</span>
           <div>
             <p className="eyebrow">Decision saved</p>
             <h2>
               {status === 'approved'
                 ? 'Spelling practice will move to tomorrow.'
-                : 'Today’s original plan will stay in place.'}
+                : 'Todayâ€™s original plan will stay in place.'}
             </h2>
             <p>You can reopen this decision while the plan is still editable.</p>
           </div>
@@ -671,11 +671,11 @@ function ApprovalView({
               <h2>Finish spelling practice today.</h2>
               <p>This adds another independent learning task after grammar.</p>
             </div>
-            <span className="decision-comparison__arrow" aria-hidden="true">→</span>
+            <span className="decision-comparison__arrow" aria-hidden="true">â†’</span>
             <div className="decision-comparison__suggested">
               <p className="eyebrow">Suggested change</p>
               <h2 id="suggested-change-title">Move spelling practice to tomorrow.</h2>
-              <p>Keep today’s teacher-led grammar lesson and protect the shorter learning block.</p>
+              <p>Keep todayâ€™s teacher-led grammar lesson and protect the shorter learning block.</p>
             </div>
           </section>
 
@@ -693,7 +693,7 @@ function ApprovalView({
               Approve adjustment
             </button>
             <button className="secondary-button" onClick={onKeepPlan} type="button">
-              Keep today’s plan
+              Keep todayâ€™s plan
             </button>
             <button className="text-action" onClick={onBack} type="button">
               Decide later
@@ -748,7 +748,7 @@ function LearnersView({ completedTaskIds, onOpenTask }: LearnersViewProps) {
                 </span>
               </div>
               <h3>{task.title}</h3>
-              <p>{task.duration} · {task.mode}</p>
+              <p>{task.duration} Â· {task.mode}</p>
               <button onClick={() => onOpenTask(task.id)} type="button">
                 {isComplete ? 'Review completed task' : `Open ${name}`}
               </button>
@@ -791,16 +791,16 @@ function ToolsView({
 
       <div className="tool-list">
         <button onClick={onRecenter} type="button">
-          <span className="tool-list__icon" aria-hidden="true">↺</span>
+          <span className="tool-list__icon" aria-hidden="true">â†º</span>
           <span>
             <strong>Recenter today</strong>
             <small>{recenterChoice ?? 'Late start, less time, or an overwhelmed learner'}</small>
           </span>
-          <span aria-hidden="true">→</span>
+          <span aria-hidden="true">â†’</span>
         </button>
 
         <button onClick={onOpenApproval} type="button">
-          <span className="tool-list__icon" aria-hidden="true">✓</span>
+          <span className="tool-list__icon" aria-hidden="true">âœ“</span>
           <span>
             <strong>Parent decisions</strong>
             <small>
@@ -809,11 +809,11 @@ function ToolsView({
                 : 'Latest recommendation decided'}
             </small>
           </span>
-          <span aria-hidden="true">→</span>
+          <span aria-hidden="true">â†’</span>
         </button>
 
         <button onClick={onImport} type="button">
-          <span className="tool-list__icon" aria-hidden="true">＋</span>
+          <span className="tool-list__icon" aria-hidden="true">ï¼‹</span>
           <span>
             <strong>Import curriculum</strong>
             <small>
@@ -822,16 +822,16 @@ function ToolsView({
                 : 'Add a curriculum PDF or photo'}
             </small>
           </span>
-          <span aria-hidden="true">→</span>
+          <span aria-hidden="true">â†’</span>
         </button>
 
         <button onClick={onOpenLibrary} type="button">
-          <span className="tool-list__icon" aria-hidden="true">▤</span>
+          <span className="tool-list__icon" aria-hidden="true">â–¤</span>
           <span>
             <strong>Curriculum library</strong>
             <small>Open your family bookshelf and source details</small>
           </span>
-          <span aria-hidden="true">→</span>
+          <span aria-hidden="true">â†’</span>
         </button>
       </div>
 
@@ -857,7 +857,7 @@ function BottomNavigation({ activeView, onChange }: BottomNavigationProps) {
         onClick={() => onChange('today')}
         type="button"
       >
-        <span aria-hidden="true">⌂</span>
+        <span aria-hidden="true">âŒ‚</span>
         Today
       </button>
       <button
@@ -865,7 +865,7 @@ function BottomNavigation({ activeView, onChange }: BottomNavigationProps) {
         onClick={() => onChange('learners')}
         type="button"
       >
-        <span aria-hidden="true">◉</span>
+        <span aria-hidden="true">â—‰</span>
         Learners
       </button>
       <button
@@ -873,9 +873,10 @@ function BottomNavigation({ activeView, onChange }: BottomNavigationProps) {
         onClick={() => onChange('tools')}
         type="button"
       >
-        <span aria-hidden="true">＋</span>
+        <span aria-hidden="true">ï¼‹</span>
         Tools
       </button>
     </nav>
   );
 }
+

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+﻿import { useEffect, useState } from 'react';
 import { RecenterDayPanel, type RecenterOption } from '../components/RecenterDayPanel';
 import { CurriculumImportFlow } from '../features/curriculum-import/CurriculumImportFlow';
 import type { ApprovedLesson } from '../features/curriculum-import/types';
@@ -68,7 +68,7 @@ const learningTasks: LearningTask[] = [
     reason: "Jack's independent work creates a clear teaching window for Remi.",
     description:
       'Teach the short grammar lesson, complete the oral practice together, and mark the lesson complete.',
-    materials: ['Grammar teacher guide', 'Remi’s workbook', 'Pencil'],
+    materials: ['Grammar teacher guide', 'Remiâ€™s workbook', 'Pencil'],
     steps: [
       'Read the lesson explanation together.',
       'Complete the oral examples.',
@@ -87,7 +87,7 @@ const prepTasks: PrepTask[] = [
     steps: [
       'Open the saved spelling quiz.',
       'Print one copy.',
-      'Place it with tomorrow’s materials.',
+      'Place it with tomorrowâ€™s materials.',
     ],
   },
 ];
@@ -96,12 +96,12 @@ const recenterOptions: RecenterOption[] = [
   {
     label: 'We started late',
     description: 'Keep the teacher-led lesson and shorten the learning block around it.',
-    result: 'Today’s learning stays focused. Tomorrow preparation remains outside the school-day sequence.',
+    result: 'Todayâ€™s learning stays focused. Tomorrow preparation remains outside the school-day sequence.',
   },
   {
     label: 'We have less time today',
     description: 'Protect the essential lesson and move flexible learning work aside.',
-    result: 'Remi’s grammar lesson stays visible. Flexible work can move without mixing in preparation tasks.',
+    result: 'Remiâ€™s grammar lesson stays visible. Flexible work can move without mixing in preparation tasks.',
   },
   {
     label: 'Someone needs a smaller start',
@@ -243,7 +243,7 @@ export function ParentWorkflowPage() {
   if (isImportFlowOpen) {
     return (
       <CurriculumImportFlow
-        onApprove={(lessons) => setApprovedImportedLessons(lessons)}
+        onApprove={() => setApprovedImportedLessons([])}
         onCancel={() => setIsImportFlowOpen(false)}
       />
     );
@@ -407,7 +407,7 @@ function TodayView({
       <section className="today-intro" aria-labelledby="today-title">
         <p className="eyebrow">Good morning</p>
         <h1 id="today-title">
-          {learningComplete ? 'Today’s learning is complete.' : 'Your first move is ready.'}
+          {learningComplete ? 'Todayâ€™s learning is complete.' : 'Your first move is ready.'}
         </h1>
         <p>
           {learningComplete
@@ -428,12 +428,12 @@ function TodayView({
         <header className="phase-section__header">
           <div>
             <p className="eyebrow">Active school day</p>
-            <h2 id="learning-phase-title">Today’s learning</h2>
+            <h2 id="learning-phase-title">Todayâ€™s learning</h2>
           </div>
           <span className="phase-badge">Now</span>
         </header>
 
-        <section className="morning-progress" aria-label="Today’s learning progress">
+        <section className="morning-progress" aria-label="Todayâ€™s learning progress">
           <div>
             <span>Learning block</span>
             <strong>{completedLearningTaskIds.size} of {learningTasks.length} complete</strong>
@@ -468,16 +468,16 @@ function TodayView({
             </div>
             <button onClick={() => onOpenLearningTask(currentLearningTask.id)} type="button">
               Open {currentLearningTask.owner}
-              <span aria-hidden="true">→</span>
+              <span aria-hidden="true">â†’</span>
             </button>
           </section>
         ) : (
           <section className="complete-card" aria-live="polite">
-            <span className="complete-card__check" aria-hidden="true">✓</span>
+            <span className="complete-card__check" aria-hidden="true">âœ“</span>
             <div>
               <p className="eyebrow">Learning finished</p>
               <h2>The active school-day sequence is complete.</h2>
-              <p>Nothing in tomorrow’s preparation is counted as student learning.</p>
+              <p>Nothing in tomorrowâ€™s preparation is counted as student learning.</p>
             </div>
             <button onClick={onOpenPrep} type="button">Wrap up and prepare tomorrow</button>
           </section>
@@ -504,12 +504,12 @@ function TodayView({
                 >
                   <button onClick={() => onOpenLearningTask(task.id)} type="button">
                     <span className="sequence-list__marker" aria-hidden="true">
-                      {isTaskComplete ? '✓' : index + 1}
+                      {isTaskComplete ? 'âœ“' : index + 1}
                     </span>
                     <span className="sequence-list__copy">
                       <small>{task.owner}</small>
                       <strong>{task.title}</strong>
-                      <span>{task.duration} · {task.mode}</span>
+                      <span>{task.duration} Â· {task.mode}</span>
                     </span>
                     <span className="sequence-list__status">
                       {isTaskComplete ? 'Done' : isCurrent ? 'Now' : 'Later'}
@@ -523,7 +523,7 @@ function TodayView({
       </section>
 
       <button className="prep-preview" onClick={onOpenPrep} type="button">
-        <span className="prep-preview__icon" aria-hidden="true">↗</span>
+        <span className="prep-preview__icon" aria-hidden="true">â†—</span>
         <span className="prep-preview__copy">
           <small>Post-day wrap-up</small>
           <strong>Get ready for tomorrow</strong>
@@ -542,7 +542,7 @@ function TodayView({
         type="button"
       >
         <span className="attention-strip__icon" aria-hidden="true">
-          {approvalStatus === 'pending' ? '!' : '✓'}
+          {approvalStatus === 'pending' ? '!' : 'âœ“'}
         </span>
         <span>
           <small>Needs your attention</small>
@@ -551,7 +551,7 @@ function TodayView({
               ? 'Approve catch-up recommendation'
               : approvalStatus === 'approved'
                 ? 'Catch-up recommendation approved'
-                : 'Today’s original plan kept'}
+                : 'Todayâ€™s original plan kept'}
           </strong>
           <span>
             {approvalStatus === 'pending'
@@ -559,7 +559,7 @@ function TodayView({
               : 'Open to review or change the decision.'}
           </span>
         </span>
-        <span aria-hidden="true">→</span>
+        <span aria-hidden="true">â†’</span>
       </button>
     </div>
   );
@@ -588,7 +588,7 @@ function LearningTaskView({
 }: LearningTaskViewProps) {
   return (
     <div className="view-shell detail-view">
-      <button className="back-button" onClick={onBack} type="button">← Back to today</button>
+      <button className="back-button" onClick={onBack} type="button">â† Back to today</button>
 
       <section className="task-heading">
         <div className="task-heading__meta">
@@ -625,14 +625,14 @@ function LearningTaskView({
 
       {isComplete ? (
         <section className="task-complete-panel" aria-live="polite">
-          <span aria-hidden="true">✓</span>
+          <span aria-hidden="true">âœ“</span>
           <div>
             <p className="eyebrow">Learning complete</p>
             <h2>{task.completionLabel}</h2>
             <p>
               {nextTask
-                ? `Next learning action: ${nextTask.owner} — ${nextTask.title}.`
-                : 'That finishes today’s active learning sequence.'}
+                ? `Next learning action: ${nextTask.owner} â€” ${nextTask.title}.`
+                : 'That finishes todayâ€™s active learning sequence.'}
             </p>
           </div>
           <button className="primary-button" onClick={onContinue} type="button">
@@ -670,19 +670,19 @@ function TomorrowPrepView({
 }: TomorrowPrepViewProps) {
   return (
     <div className="view-shell detail-view prep-view">
-      <button className="back-button" onClick={onBack} type="button">← Back to today</button>
+      <button className="back-button" onClick={onBack} type="button">â† Back to today</button>
 
       <section className="page-heading">
         <p className="eyebrow">Post-day preparation</p>
         <h1>Get ready for tomorrow.</h1>
         <p>
-          This work supports school, but it is not part of today’s learning sequence.
+          This work supports school, but it is not part of todayâ€™s learning sequence.
         </p>
       </section>
 
       {!learningComplete ? (
         <section className="prep-boundary-note">
-          <span aria-hidden="true">○</span>
+          <span aria-hidden="true">â—‹</span>
           <div>
             <strong>Save this for after lessons.</strong>
             <p>You can look ahead now, but IterNest will not mix it into the active school day.</p>
@@ -697,9 +697,9 @@ function TomorrowPrepView({
           return (
             <section className={isComplete ? 'prep-task is-complete' : 'prep-task'} key={task.id}>
               <div className="prep-task__heading">
-                <span aria-hidden="true">{isComplete ? '✓' : '1'}</span>
+                <span aria-hidden="true">{isComplete ? 'âœ“' : '1'}</span>
                 <div>
-                  <p className="eyebrow">Tomorrow prep · {task.duration}</p>
+                  <p className="eyebrow">Tomorrow prep Â· {task.duration}</p>
                   <h2>{task.title}</h2>
                 </div>
               </div>
@@ -729,7 +729,7 @@ function TomorrowPrepView({
 
       {prepComplete ? (
         <section className="tomorrow-ready" aria-live="polite">
-          <span aria-hidden="true">✓</span>
+          <span aria-hidden="true">âœ“</span>
           <div>
             <p className="eyebrow">Wrap-up complete</p>
             <h2>Tomorrow is ready.</h2>
@@ -760,7 +760,7 @@ function ApprovalView({
 
   return (
     <div className="view-shell detail-view">
-      <button className="back-button" onClick={onBack} type="button">← Back to today</button>
+      <button className="back-button" onClick={onBack} type="button">â† Back to today</button>
 
       <section className="approval-heading">
         <p className="eyebrow">Needs your attention</p>
@@ -770,13 +770,13 @@ function ApprovalView({
 
       {hasDecision ? (
         <section className={`decision-result decision-result--${status}`} aria-live="polite">
-          <span aria-hidden="true">✓</span>
+          <span aria-hidden="true">âœ“</span>
           <div>
             <p className="eyebrow">Decision saved</p>
             <h2>
               {status === 'approved'
                 ? 'Spelling practice will move to tomorrow.'
-                : 'Today’s original learning plan will stay in place.'}
+                : 'Todayâ€™s original learning plan will stay in place.'}
             </h2>
             <p>You can reopen this decision while the plan is still editable.</p>
           </div>
@@ -792,11 +792,11 @@ function ApprovalView({
               <h2>Finish spelling practice today.</h2>
               <p>This adds another independent learning task after grammar.</p>
             </div>
-            <span className="decision-comparison__arrow" aria-hidden="true">→</span>
+            <span className="decision-comparison__arrow" aria-hidden="true">â†’</span>
             <div className="decision-comparison__suggested">
               <p className="eyebrow">Suggested change</p>
               <h2 id="suggested-change-title">Move spelling practice to tomorrow.</h2>
-              <p>Keep today’s teacher-led grammar lesson and protect the shorter learning block.</p>
+              <p>Keep todayâ€™s teacher-led grammar lesson and protect the shorter learning block.</p>
             </div>
           </section>
 
@@ -805,7 +805,7 @@ function ApprovalView({
             <ul>
               <li>Grammar requires your instruction today.</li>
               <li>Spelling practice is flexible and has no blocking dependency.</li>
-              <li>Moving learning work is separate from preparing tomorrow’s materials.</li>
+              <li>Moving learning work is separate from preparing tomorrowâ€™s materials.</li>
             </ul>
           </section>
 
@@ -814,7 +814,7 @@ function ApprovalView({
               Approve adjustment
             </button>
             <button className="secondary-button" onClick={onKeepPlan} type="button">
-              Keep today’s plan
+              Keep todayâ€™s plan
             </button>
             <button className="text-action" onClick={onBack} type="button">
               Decide later
@@ -906,16 +906,16 @@ function ToolsView({
 
       <div className="tool-list">
         <button onClick={onRecenter} type="button">
-          <span className="tool-list__icon" aria-hidden="true">↺</span>
+          <span className="tool-list__icon" aria-hidden="true">â†º</span>
           <span>
             <strong>Recenter today</strong>
             <small>{recenterChoice ?? 'Late start, less time, or an overwhelmed learner'}</small>
           </span>
-          <span aria-hidden="true">→</span>
+          <span aria-hidden="true">â†’</span>
         </button>
 
         <button onClick={onOpenApproval} type="button">
-          <span className="tool-list__icon" aria-hidden="true">✓</span>
+          <span className="tool-list__icon" aria-hidden="true">âœ“</span>
           <span>
             <strong>Parent decisions</strong>
             <small>
@@ -924,20 +924,20 @@ function ToolsView({
                 : 'Latest recommendation decided'}
             </small>
           </span>
-          <span aria-hidden="true">→</span>
+          <span aria-hidden="true">â†’</span>
         </button>
 
         <button onClick={onOpenPrep} type="button">
-          <span className="tool-list__icon" aria-hidden="true">↗</span>
+          <span className="tool-list__icon" aria-hidden="true">â†—</span>
           <span>
             <strong>Get ready for tomorrow</strong>
             <small>{prepComplete ? 'Tomorrow is ready' : 'Post-day preparation waiting'}</small>
           </span>
-          <span aria-hidden="true">→</span>
+          <span aria-hidden="true">â†’</span>
         </button>
 
         <button onClick={onImport} type="button">
-          <span className="tool-list__icon" aria-hidden="true">＋</span>
+          <span className="tool-list__icon" aria-hidden="true">ï¼‹</span>
           <span>
             <strong>Import curriculum</strong>
             <small>
@@ -946,16 +946,16 @@ function ToolsView({
                 : 'Add a curriculum PDF or photo'}
             </small>
           </span>
-          <span aria-hidden="true">→</span>
+          <span aria-hidden="true">â†’</span>
         </button>
 
         <button onClick={onOpenLibrary} type="button">
-          <span className="tool-list__icon" aria-hidden="true">▤</span>
+          <span className="tool-list__icon" aria-hidden="true">â–¤</span>
           <span>
             <strong>Curriculum library</strong>
             <small>Open your family bookshelf and source details</small>
           </span>
-          <span aria-hidden="true">→</span>
+          <span aria-hidden="true">â†’</span>
         </button>
       </div>
 
@@ -984,7 +984,7 @@ function BottomNavigation({ activeView, onChange }: BottomNavigationProps) {
         onClick={() => onChange('today')}
         type="button"
       >
-        <span aria-hidden="true">⌂</span>
+        <span aria-hidden="true">âŒ‚</span>
         Today
       </button>
       <button
@@ -992,7 +992,7 @@ function BottomNavigation({ activeView, onChange }: BottomNavigationProps) {
         onClick={() => onChange('learners')}
         type="button"
       >
-        <span aria-hidden="true">◉</span>
+        <span aria-hidden="true">â—‰</span>
         Learners
       </button>
       <button
@@ -1000,9 +1000,10 @@ function BottomNavigation({ activeView, onChange }: BottomNavigationProps) {
         onClick={() => onChange('tools')}
         type="button"
       >
-        <span aria-hidden="true">＋</span>
+        <span aria-hidden="true">ï¼‹</span>
         Tools
       </button>
     </nav>
   );
 }
+

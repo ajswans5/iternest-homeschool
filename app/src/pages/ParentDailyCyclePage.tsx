@@ -1,37 +1,27 @@
 import { useEffect, useMemo, useState } from 'react';
 import { RecenterDayPanel, type RecenterOption } from '../components/RecenterDayPanel';
 import { CurriculumImportFlow } from '../features/curriculum-import/CurriculumImportFlow';
-import type { ApprovedLesson } from '../features/curriculum-import/types';
+import {
+  getActiveCurriculumRecord,
+  loadPersistedHomeschoolData,
+  savePersistedHomeschoolData,
+  setActiveCurriculumRecord,
+  upsertCurriculumRecord,
+  type PersistedCurriculumRecord,
+  type PersistedLearningTask,
+  type PersistedPrepTask,
+} from '../features/daily-cycle/dailyCyclePersistence';
 import '../styles/parent-home.css';
 import '../styles/daily-cycle.css';
 import { CurriculumLibraryPage } from './CurriculumLibraryPage';
 
 type AppView = 'today' | 'task' | 'prep' | 'approval' | 'learners' | 'print' | 'tools';
-type LearningTaskId = 'jack-handwriting' | 'remi-grammar';
-type PrepTaskId = 'stage-handwriting' | 'stage-grammar' | 'print-spelling';
+type LearningTaskId = string;
+type PrepTaskId = string;
 type ApprovalStatus = 'pending' | 'approved' | 'kept';
 
-type LearningTask = {
-  id: LearningTaskId;
-  owner: string;
-  title: string;
-  duration: string;
-  mode: string;
-  reason: string;
-  description: string;
-  materials: string[];
-  studentSteps: string[];
-  completionLabel: string;
-};
-
-type PrepTask = {
-  id: PrepTaskId;
-  title: string;
-  duration: string;
-  reason: string;
-  steps: string[];
-  morningReminder: string;
-};
+type LearningTask = PersistedLearningTask;
+type PrepTask = PersistedPrepTask;
 
 type DayState = {
   dateKey: string;
@@ -45,90 +35,17 @@ type DayState = {
 
 const STORAGE_KEY = 'iternest-homeschool-daily-cycle-v5';
 
-const learningTasks: LearningTask[] = [
-  {
-    id: 'jack-handwriting',
-    owner: 'Jack',
-    title: 'Independent handwriting',
-    duration: '15 minutes',
-    mode: 'Independent',
-    reason: "Jack can work independently while you get ready to teach Remi's grammar lesson.",
-    description:
-      'Jack completes the assigned handwriting page independently and leaves it in the review spot.',
-    materials: ['Handwriting book', 'Sharpened pencil'],
-    studentSteps: [
-      'Open the assigned handwriting page.',
-      'Complete the copywork carefully.',
-      'Leave the finished page in the review spot.',
-    ],
-    completionLabel: 'Handwriting complete',
-  },
-  {
-    id: 'remi-grammar',
-    owner: 'Remi',
-    title: 'Grammar lesson',
-    duration: '20 minutes',
-    mode: 'With parent',
-    reason: "Jack's independent work creates a clear teaching window for Remi.",
-    description:
-      'Teach the short grammar lesson, complete the oral practice together, and finish the written practice.',
-    materials: ['Grammar teacher guide', 'Remi’s workbook', 'Pencil'],
-    studentSteps: [
-      'Listen to the lesson explanation.',
-      'Complete the oral examples together.',
-      'Finish the short written practice.',
-    ],
-    completionLabel: 'Grammar lesson complete',
-  },
-];
-
-const prepTasks: PrepTask[] = [
-  {
-    id: 'stage-handwriting',
-    title: 'Set out Jack’s handwriting materials',
-    duration: '1 minute',
-    reason: 'Jack can begin independently without waiting for materials.',
-    steps: [
-      'Place the handwriting book on the table.',
-      'Set a sharpened pencil beside it.',
-    ],
-    morningReminder: 'Jack’s handwriting book and pencil are on the table.',
-  },
-  {
-    id: 'stage-grammar',
-    title: 'Stage Remi’s grammar lesson',
-    duration: '2 minutes',
-    reason: 'The teacher-led lesson can begin as soon as Jack starts handwriting.',
-    steps: [
-      'Open the teacher guide to the assigned lesson.',
-      'Place Remi’s workbook and pencil with it.',
-    ],
-    morningReminder: 'Remi’s grammar guide and workbook are together.',
-  },
-  {
-    id: 'print-spelling',
-    title: 'Print the spelling quiz',
-    duration: '2 minutes',
-    reason: 'Tomorrow begins ready instead of with another setup task.',
-    steps: [
-      'Open the saved spelling quiz.',
-      'Print one copy.',
-      'Place it with tomorrow’s materials.',
-    ],
-    morningReminder: 'The spelling quiz is printed with tomorrow’s materials.',
-  },
-];
 
 const recenterOptions: RecenterOption[] = [
   {
     label: 'We started late',
     description: 'Keep the teacher-led lesson and shorten the learning block around it.',
-    result: 'Today’s learning stays focused. Tomorrow preparation remains outside the school day.',
+    result: 'Todayâ€™s learning stays focused. Tomorrow preparation remains outside the school day.',
   },
   {
     label: 'We have less time today',
     description: 'Protect the essential lesson and move flexible learning work aside.',
-    result: 'Remi’s grammar lesson stays visible. Flexible work can move without mixing in preparation.',
+    result: 'Remiâ€™s grammar lesson stays visible. Flexible work can move without mixing in preparation.',
   },
   {
     label: 'Someone needs a smaller start',
@@ -149,7 +66,7 @@ function localDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-function createInitialDayState(): DayState {
+function createInitialDayState(prepTasks: PrepTask[] = []): DayState {
   return {
     dateKey: localDateKey(),
     completedLearningTaskIds: [],
@@ -161,18 +78,28 @@ function createInitialDayState(): DayState {
   };
 }
 
-function isLearningTaskId(value: unknown): value is LearningTaskId {
-  return learningTasks.some((task) => task.id === value);
+function isStringId(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
 }
 
-function isPrepTaskId(value: unknown): value is PrepTaskId {
-  return prepTasks.some((task) => task.id === value);
-}
-
-function remindersFromPrepIds(ids: PrepTaskId[]) {
+function remindersFromPrepIds(ids: PrepTaskId[], prepTasks: PrepTask[]) {
   return ids
     .map((id) => prepTasks.find((task) => task.id === id)?.morningReminder)
     .filter((reminder): reminder is string => Boolean(reminder));
+}
+
+function reconcileDayStateForPlan(dayState: DayState, learningTasks: LearningTask[], prepTasks: PrepTask[]): DayState {
+  const learningTaskIds = new Set(learningTasks.map((task) => task.id));
+  const prepTaskIds = new Set(prepTasks.map((task) => task.id));
+
+  return {
+    ...dayState,
+    completedLearningTaskIds: dayState.completedLearningTaskIds.filter((id) => learningTaskIds.has(id)),
+    completedPrepTaskIds: dayState.completedPrepTaskIds.filter((id) => prepTaskIds.has(id)),
+    preparedLastNight: dayState.preparedLastNight.length > 0
+      ? dayState.preparedLastNight
+      : remindersFromPrepIds(dayState.completedPrepTaskIds, prepTasks),
+  };
 }
 
 function loadDayState(): DayState {
@@ -187,13 +114,13 @@ function loadDayState(): DayState {
 
     const parsed = JSON.parse(saved) as Partial<DayState>;
     const completedPrepTaskIds = Array.isArray(parsed.completedPrepTaskIds)
-      ? parsed.completedPrepTaskIds.filter(isPrepTaskId)
+      ? parsed.completedPrepTaskIds.filter(isStringId)
       : [];
 
     if (parsed.dateKey && parsed.dateKey !== localDateKey()) {
       return {
         ...initial,
-        preparedLastNight: remindersFromPrepIds(completedPrepTaskIds),
+        preparedLastNight: [],
       };
     }
 
@@ -205,7 +132,7 @@ function loadDayState(): DayState {
     return {
       dateKey: localDateKey(),
       completedLearningTaskIds: Array.isArray(parsed.completedLearningTaskIds)
-        ? parsed.completedLearningTaskIds.filter(isLearningTaskId)
+        ? parsed.completedLearningTaskIds.filter(isStringId)
         : [],
       completedPrepTaskIds,
       approvalStatus,
@@ -223,16 +150,31 @@ function loadDayState(): DayState {
 
 export function ParentDailyCyclePage() {
   const [activeView, setActiveView] = useState<AppView>('today');
-  const [selectedTaskId, setSelectedTaskId] = useState<LearningTaskId>('jack-handwriting');
+  const [homeschoolData, setHomeschoolData] = useState(loadPersistedHomeschoolData);
+  const [selectedTaskId, setSelectedTaskId] = useState<LearningTaskId>('');
   const [dayState, setDayState] = useState<DayState>(loadDayState);
   const [isRecenterPanelOpen, setIsRecenterPanelOpen] = useState(false);
   const [isImportFlowOpen, setIsImportFlowOpen] = useState(false);
   const [isCurriculumLibraryOpen, setIsCurriculumLibraryOpen] = useState(false);
-  const [approvedImportedLessons, setApprovedImportedLessons] = useState<ApprovedLesson[]>([]);
+
+  const activeCurriculum = getActiveCurriculumRecord(homeschoolData);
+  const learningTasks = activeCurriculum?.dailyCycle.learningTasks ?? [];
+  const prepTasks = activeCurriculum?.dailyCycle.prepTasks ?? [];
+
+  useEffect(() => {
+    savePersistedHomeschoolData(homeschoolData);
+  }, [homeschoolData]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(dayState));
   }, [dayState]);
+
+  useEffect(() => {
+    setDayState((current) => reconcileDayStateForPlan(current, learningTasks, prepTasks));
+    setSelectedTaskId((current) => (
+      learningTasks.some((task) => task.id === current) ? current : learningTasks[0]?.id ?? ''
+    ));
+  }, [activeCurriculum?.id]);
 
   const today = new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
@@ -248,11 +190,13 @@ export function ParentDailyCyclePage() {
     ? learningTasks.findIndex((task) => task.id === currentLearningTask.id)
     : learningTasks.length;
   const selectedTask =
-    learningTasks.find((task) => task.id === selectedTaskId) ?? learningTasks[0];
-  const selectedTaskIndex = learningTasks.findIndex((task) => task.id === selectedTask.id);
-  const nextLearningTask = learningTasks[selectedTaskIndex + 1] ?? null;
-  const learningComplete = currentLearningTask === null;
-  const prepComplete = prepTasks.every((task) => completedPrepTaskIds.has(task.id));
+    learningTasks.find((task) => task.id === selectedTaskId) ?? currentLearningTask ?? learningTasks[0] ?? null;
+  const selectedTaskIndex = selectedTask
+    ? learningTasks.findIndex((task) => task.id === selectedTask.id)
+    : -1;
+  const nextLearningTask = selectedTaskIndex >= 0 ? learningTasks[selectedTaskIndex + 1] ?? null : null;
+  const learningComplete = learningTasks.length > 0 && currentLearningTask === null;
+  const prepComplete = prepTasks.length > 0 && prepTasks.every((task) => completedPrepTaskIds.has(task.id));
   const recenterResult = recenterOptions.find(
     (option) => option.label === dayState.recenterChoice,
   )?.result;
@@ -298,17 +242,31 @@ export function ParentDailyCyclePage() {
 
   function resetPrototypeDay() {
     setDayState({
-      ...createInitialDayState(),
-      preparedLastNight: remindersFromPrepIds(dayState.completedPrepTaskIds),
+      ...createInitialDayState(prepTasks),
+      preparedLastNight: remindersFromPrepIds(dayState.completedPrepTaskIds, prepTasks),
     });
-    setSelectedTaskId('jack-handwriting');
+    setSelectedTaskId(learningTasks[0]?.id ?? '');
+    setActiveView('today');
+  }
+
+  function handleImportApproved(curriculum: PersistedCurriculumRecord) {
+    setHomeschoolData((current) => upsertCurriculumRecord(current, curriculum));
+    setDayState(createInitialDayState(curriculum.dailyCycle.prepTasks));
+    setSelectedTaskId(curriculum.dailyCycle.learningTasks[0]?.id ?? '');
+  }
+
+  function handleSelectCurriculum(curriculumId: string) {
+    const selected = homeschoolData.curricula.find((curriculum) => curriculum.id === curriculumId);
+    setHomeschoolData((current) => setActiveCurriculumRecord(current, curriculumId));
+    setDayState(createInitialDayState(selected?.dailyCycle.prepTasks ?? []));
+    setSelectedTaskId(selected?.dailyCycle.learningTasks[0]?.id ?? '');
     setActiveView('today');
   }
 
   if (isImportFlowOpen) {
     return (
       <CurriculumImportFlow
-        onApprove={(lessons) => setApprovedImportedLessons(lessons)}
+        onApprove={handleImportApproved}
         onCancel={() => setIsImportFlowOpen(false)}
       />
     );
@@ -337,12 +295,17 @@ export function ParentDailyCyclePage() {
         <p>{today}</p>
       </header>
 
-      {activeView === 'today' && !learningComplete ? (
+      {activeView === 'today' && !activeCurriculum ? (
+        <NoCurriculumView onImport={() => setIsImportFlowOpen(true)} />
+      ) : null}
+
+      {activeView === 'today' && activeCurriculum && currentLearningTask ? (
         <MorningLearningView
           approvalStatus={dayState.approvalStatus}
           completedLearningTaskIds={completedLearningTaskIds}
           currentLearningIndex={currentLearningIndex}
           currentLearningTask={currentLearningTask}
+          learningTasks={learningTasks}
           morningReminderSeen={dayState.morningReminderSeen}
           onOpenApproval={() => setActiveView('approval')}
           onOpenLearningTask={openLearningTask}
@@ -354,7 +317,7 @@ export function ParentDailyCyclePage() {
         />
       ) : null}
 
-      {activeView === 'today' && learningComplete ? (
+      {activeView === 'today' && activeCurriculum && learningComplete ? (
         <SchoolDayCompleteView
           approvalStatus={dayState.approvalStatus}
           completedPrepTaskIds={completedPrepTaskIds}
@@ -362,10 +325,11 @@ export function ParentDailyCyclePage() {
           onOpenPrep={() => setActiveView('prep')}
           onTogglePrepTask={togglePrepTask}
           prepComplete={prepComplete}
+          prepTasks={prepTasks}
         />
       ) : null}
 
-      {activeView === 'task' ? (
+      {activeView === 'task' && selectedTask ? (
         <LearningTaskView
           isComplete={completedLearningTaskIds.has(selectedTask.id)}
           nextTask={nextLearningTask}
@@ -381,6 +345,7 @@ export function ParentDailyCyclePage() {
           onReopen={() => reopenLearningTask(selectedTask.id)}
           task={selectedTask}
           taskIndex={selectedTaskIndex}
+          taskCount={learningTasks.length}
         />
       ) : null}
 
@@ -391,6 +356,7 @@ export function ParentDailyCyclePage() {
           onBack={() => setActiveView('today')}
           onTogglePrepTask={togglePrepTask}
           prepComplete={prepComplete}
+          prepTasks={prepTasks}
         />
       ) : null}
 
@@ -413,19 +379,22 @@ export function ParentDailyCyclePage() {
       {activeView === 'learners' ? (
         <LearnersView
           completedLearningTaskIds={completedLearningTaskIds}
+          learningTasks={learningTasks}
           onOpenLearningTask={openLearningTask}
           onOpenPrint={() => setActiveView('print')}
         />
       ) : null}
 
       {activeView === 'print' ? (
-        <StudentPrintCenter onBack={() => setActiveView('tools')} today={today} />
+        <StudentPrintCenter learningTasks={learningTasks} onBack={() => setActiveView('tools')} today={today} />
       ) : null}
 
       {activeView === 'tools' ? (
         <ToolsView
           approvalStatus={dayState.approvalStatus}
-          importedLessonCount={approvedImportedLessons.length}
+          activeCurriculumId={activeCurriculum?.id ?? null}
+          curricula={homeschoolData.curricula}
+          importedLessonCount={homeschoolData.curricula.length}
           onImport={() => setIsImportFlowOpen(true)}
           onOpenApproval={() => setActiveView('approval')}
           onOpenLibrary={() => setIsCurriculumLibraryOpen(true)}
@@ -433,6 +402,7 @@ export function ParentDailyCyclePage() {
           onOpenPrint={() => setActiveView('print')}
           onRecenter={() => setIsRecenterPanelOpen(true)}
           onReset={resetPrototypeDay}
+          onSelectCurriculum={handleSelectCurriculum}
           prepComplete={prepComplete}
           recenterChoice={dayState.recenterChoice}
         />
@@ -452,11 +422,37 @@ export function ParentDailyCyclePage() {
   );
 }
 
+type NoCurriculumViewProps = {
+  onImport: () => void;
+};
+
+function NoCurriculumView({ onImport }: NoCurriculumViewProps) {
+  return (
+    <div className="cycle-shell">
+      <section className="cycle-intro" aria-labelledby="no-curriculum-title">
+        <p className="cycle-eyebrow">Good morning</p>
+        <h1 id="no-curriculum-title">Import a curriculum to build today.</h1>
+        <p>The daily cycle is waiting for persisted curriculum data. No placeholder learning sequence is being shown.</p>
+      </section>
+      <section className="cycle-start-card">
+        <p className="cycle-eyebrow">Start here</p>
+        <h2>Import curriculum</h2>
+        <p className="cycle-start-card__duration">Required before daily-cycle tasks can be generated</p>
+        <div className="cycle-start-card__reason">
+          <strong>Why this first</strong>
+          <p>IterNest needs an approved curriculum source before it can show a real Start Here task.</p>
+        </div>
+        <button onClick={onImport} type="button">Import Curriculum<span aria-hidden="true">→</span></button>
+      </section>
+    </div>
+  );
+}
 type MorningLearningViewProps = {
   approvalStatus: ApprovalStatus;
   completedLearningTaskIds: Set<LearningTaskId>;
   currentLearningIndex: number;
   currentLearningTask: LearningTask;
+  learningTasks: LearningTask[];
   morningReminderSeen: boolean;
   onOpenApproval: () => void;
   onOpenLearningTask: (taskId: LearningTaskId) => void;
@@ -472,6 +468,7 @@ function MorningLearningView({
   completedLearningTaskIds,
   currentLearningIndex,
   currentLearningTask,
+  learningTasks,
   morningReminderSeen,
   onOpenApproval,
   onOpenLearningTask,
@@ -486,13 +483,13 @@ function MorningLearningView({
       <section className="cycle-intro" aria-labelledby="today-title">
         <p className="cycle-eyebrow">Good morning</p>
         <h1 id="today-title">Your first move is ready.</h1>
-        <p>Only what matters now: a quick reminder, then today’s learning sequence.</p>
+        <p>Only what matters now: a quick reminder, then todayâ€™s learning sequence.</p>
       </section>
 
       {!morningReminderSeen && preparedLastNight.length > 0 ? (
         <aside className="prepared-reminder" aria-label="Prepared last night">
           <div className="prepared-reminder__heading">
-            <span aria-hidden="true">✓</span>
+            <span aria-hidden="true">âœ“</span>
             <div>
               <p className="cycle-eyebrow">Prepared last night</p>
               <h2>Yesterday-you already handled this.</h2>
@@ -527,7 +524,7 @@ function MorningLearningView({
         </div>
         <button onClick={() => onOpenLearningTask(currentLearningTask.id)} type="button">
           Open {currentLearningTask.owner}
-          <span aria-hidden="true">→</span>
+          <span aria-hidden="true">â†’</span>
         </button>
       </section>
 
@@ -538,7 +535,7 @@ function MorningLearningView({
       <section className="cycle-sequence" aria-labelledby="learning-order-title">
         <div className="cycle-section-heading">
           <div>
-            <p className="cycle-eyebrow">Today’s learning</p>
+            <p className="cycle-eyebrow">Todayâ€™s learning</p>
             <h2 id="learning-order-title">Then what?</h2>
           </div>
           <span>{completedLearningTaskIds.size} of {learningTasks.length}</span>
@@ -551,11 +548,11 @@ function MorningLearningView({
             return (
               <li className={`${isComplete ? 'is-complete' : ''} ${isCurrent ? 'is-current' : ''}`} key={task.id}>
                 <button onClick={() => onOpenLearningTask(task.id)} type="button">
-                  <span className="cycle-sequence__marker">{isComplete ? '✓' : index + 1}</span>
+                  <span className="cycle-sequence__marker">{isComplete ? 'âœ“' : index + 1}</span>
                   <span className="cycle-sequence__copy">
                     <small>{task.owner}</small>
                     <strong>{task.title}</strong>
-                    <span>{task.duration} · {task.mode}</span>
+                    <span>{task.duration} Â· {task.mode}</span>
                   </span>
                   <span className="cycle-sequence__status">
                     {isComplete ? 'Done' : isCurrent ? 'Now' : 'Later'}
@@ -575,6 +572,7 @@ function MorningLearningView({
 type SchoolDayCompleteViewProps = {
   approvalStatus: ApprovalStatus;
   completedPrepTaskIds: Set<PrepTaskId>;
+  prepTasks: PrepTask[];
   onOpenApproval: () => void;
   onOpenPrep: () => void;
   onTogglePrepTask: (taskId: PrepTaskId) => void;
@@ -584,6 +582,7 @@ type SchoolDayCompleteViewProps = {
 function SchoolDayCompleteView({
   approvalStatus,
   completedPrepTaskIds,
+  prepTasks,
   onOpenApproval,
   onOpenPrep,
   onTogglePrepTask,
@@ -592,10 +591,10 @@ function SchoolDayCompleteView({
   return (
     <div className="cycle-shell cycle-shell--complete">
       <section className="school-complete-hero" aria-live="polite">
-        <span aria-hidden="true">✓</span>
+        <span aria-hidden="true">âœ“</span>
         <p className="cycle-eyebrow">School day complete</p>
-        <h1>Today’s learning is finished.</h1>
-        <p>The learning phase is closed. Now the screen has changed to tomorrow’s short wrap-up.</p>
+        <h1>Todayâ€™s learning is finished.</h1>
+        <p>The learning phase is closed. Now the screen has changed to tomorrowâ€™s short wrap-up.</p>
       </section>
 
       <section className="wrap-up-section" aria-labelledby="wrap-up-title">
@@ -618,10 +617,10 @@ function SchoolDayCompleteView({
                 onClick={() => onTogglePrepTask(task.id)}
                 type="button"
               >
-                <span className="wrap-up-list__check" aria-hidden="true">{isComplete ? '✓' : ''}</span>
+                <span className="wrap-up-list__check" aria-hidden="true">{isComplete ? 'âœ“' : ''}</span>
                 <span>
                   <strong>{task.title}</strong>
-                  <small>{task.duration} · {task.reason}</small>
+                  <small>{task.duration} Â· {task.reason}</small>
                 </span>
               </button>
             );
@@ -635,7 +634,7 @@ function SchoolDayCompleteView({
 
       {prepComplete ? (
         <section className="tomorrow-ready-card" aria-live="polite">
-          <span aria-hidden="true">✓</span>
+          <span aria-hidden="true">âœ“</span>
           <div>
             <p className="cycle-eyebrow">Wrap-up complete</p>
             <h2>Tomorrow is ready.</h2>
@@ -658,6 +657,7 @@ type LearningTaskViewProps = {
   onReopen: () => void;
   task: LearningTask;
   taskIndex: number;
+  taskCount: number;
 };
 
 function LearningTaskView({
@@ -669,14 +669,15 @@ function LearningTaskView({
   onReopen,
   task,
   taskIndex,
+  taskCount,
 }: LearningTaskViewProps) {
   return (
     <div className="cycle-shell cycle-detail-view">
-      <button className="cycle-back-button" onClick={onBack} type="button">← Back to today</button>
+      <button className="cycle-back-button" onClick={onBack} type="button">â† Back to today</button>
 
       <section className="cycle-page-heading">
         <div className="cycle-task-meta">
-          <span>Learning step {taskIndex + 1} of {learningTasks.length}</span>
+          <span>Learning step {taskIndex + 1} of {taskCount}</span>
           <span>{task.mode}</span>
         </div>
         <p className="cycle-eyebrow">{task.owner}</p>
@@ -708,14 +709,14 @@ function LearningTaskView({
 
       {isComplete ? (
         <section className="cycle-complete-panel" aria-live="polite">
-          <span aria-hidden="true">✓</span>
+          <span aria-hidden="true">âœ“</span>
           <div>
             <p className="cycle-eyebrow">Learning complete</p>
             <h2>{task.completionLabel}</h2>
             <p>
               {nextTask
-                ? `Next learning action: ${nextTask.owner} — ${nextTask.title}.`
-                : 'That finishes today’s active learning sequence.'}
+                ? `Next learning action: ${nextTask.owner} â€” ${nextTask.title}.`
+                : 'That finishes todayâ€™s active learning sequence.'}
             </p>
           </div>
           <button className="cycle-primary-button" onClick={onContinue} type="button">
@@ -736,6 +737,7 @@ function LearningTaskView({
 
 type TomorrowPrepViewProps = {
   completedPrepTaskIds: Set<PrepTaskId>;
+  prepTasks: PrepTask[];
   learningComplete: boolean;
   onBack: () => void;
   onTogglePrepTask: (taskId: PrepTaskId) => void;
@@ -744,6 +746,7 @@ type TomorrowPrepViewProps = {
 
 function TomorrowPrepView({
   completedPrepTaskIds,
+  prepTasks,
   learningComplete,
   onBack,
   onTogglePrepTask,
@@ -751,16 +754,16 @@ function TomorrowPrepView({
 }: TomorrowPrepViewProps) {
   return (
     <div className="cycle-shell cycle-detail-view">
-      <button className="cycle-back-button" onClick={onBack} type="button">← Back to today</button>
+      <button className="cycle-back-button" onClick={onBack} type="button">â† Back to today</button>
       <section className="cycle-page-heading">
         <p className="cycle-eyebrow">Post-day preparation</p>
         <h1>Get ready for tomorrow.</h1>
-        <p>This supports school, but it is not part of today’s student learning.</p>
+        <p>This supports school, but it is not part of todayâ€™s student learning.</p>
       </section>
 
       {!learningComplete ? (
         <section className="cycle-boundary-note">
-          <span aria-hidden="true">○</span>
+          <span aria-hidden="true">â—‹</span>
           <div>
             <strong>Save this for after lessons.</strong>
             <p>You can look ahead now, but IterNest will not mix this into the active school day.</p>
@@ -775,9 +778,9 @@ function TomorrowPrepView({
           return (
             <section className={isComplete ? 'cycle-prep-task is-complete' : 'cycle-prep-task'} key={task.id}>
               <div className="cycle-prep-task__heading">
-                <span aria-hidden="true">{isComplete ? '✓' : taskIndex + 1}</span>
+                <span aria-hidden="true">{isComplete ? 'âœ“' : taskIndex + 1}</span>
                 <div>
-                  <p className="cycle-eyebrow">Tomorrow prep · {task.duration}</p>
+                  <p className="cycle-eyebrow">Tomorrow prep Â· {task.duration}</p>
                   <h2>{task.title}</h2>
                 </div>
               </div>
@@ -804,7 +807,7 @@ function TomorrowPrepView({
 
       {prepComplete ? (
         <section className="tomorrow-ready-card" aria-live="polite">
-          <span aria-hidden="true">✓</span>
+          <span aria-hidden="true">âœ“</span>
           <div>
             <p className="cycle-eyebrow">Wrap-up complete</p>
             <h2>Tomorrow is ready.</h2>
@@ -829,7 +832,7 @@ function ApprovalView({ onApprove, onBack, onKeepPlan, onReopen, status }: Appro
 
   return (
     <div className="cycle-shell cycle-detail-view">
-      <button className="cycle-back-button" onClick={onBack} type="button">← Back to today</button>
+      <button className="cycle-back-button" onClick={onBack} type="button">â† Back to today</button>
       <section className="cycle-page-heading">
         <p className="cycle-eyebrow">Needs your attention</p>
         <h1>Catch-up recommendation</h1>
@@ -838,13 +841,13 @@ function ApprovalView({ onApprove, onBack, onKeepPlan, onReopen, status }: Appro
 
       {hasDecision ? (
         <section className="cycle-decision-result" aria-live="polite">
-          <span aria-hidden="true">✓</span>
+          <span aria-hidden="true">âœ“</span>
           <div>
             <p className="cycle-eyebrow">Decision saved</p>
             <h2>
               {status === 'approved'
                 ? 'Spelling practice will move to tomorrow.'
-                : 'Today’s original learning plan will stay in place.'}
+                : 'Todayâ€™s original learning plan will stay in place.'}
             </h2>
             <p>You can reopen this decision while the plan is still editable.</p>
           </div>
@@ -858,16 +861,16 @@ function ApprovalView({ onApprove, onBack, onKeepPlan, onReopen, status }: Appro
               <h2>Finish spelling practice today.</h2>
               <p>This adds another independent learning task after grammar.</p>
             </div>
-            <span aria-hidden="true">→</span>
+            <span aria-hidden="true">â†’</span>
             <div>
               <p className="cycle-eyebrow">Suggested change</p>
               <h2>Move spelling practice to tomorrow.</h2>
-              <p>Keep today’s teacher-led grammar lesson and protect the shorter learning block.</p>
+              <p>Keep todayâ€™s teacher-led grammar lesson and protect the shorter learning block.</p>
             </div>
           </section>
           <div className="cycle-decision-actions">
             <button className="cycle-primary-button" onClick={onApprove} type="button">Approve adjustment</button>
-            <button className="cycle-secondary-button" onClick={onKeepPlan} type="button">Keep today’s plan</button>
+            <button className="cycle-secondary-button" onClick={onKeepPlan} type="button">Keep todayâ€™s plan</button>
             <button className="cycle-text-button" onClick={onBack} type="button">Decide later</button>
           </div>
         </>
@@ -878,12 +881,14 @@ function ApprovalView({ onApprove, onBack, onKeepPlan, onReopen, status }: Appro
 
 type LearnersViewProps = {
   completedLearningTaskIds: Set<LearningTaskId>;
+  learningTasks: LearningTask[];
   onOpenLearningTask: (taskId: LearningTaskId) => void;
   onOpenPrint: () => void;
 };
 
 function LearnersView({
   completedLearningTaskIds,
+  learningTasks,
   onOpenLearningTask,
   onOpenPrint,
 }: LearnersViewProps) {
@@ -892,16 +897,16 @@ function LearnersView({
       <section className="cycle-page-heading">
         <p className="cycle-eyebrow">Learners</p>
         <h1>Today, child by child.</h1>
-        <p>Open a learner’s task or print the student-facing version for paper use.</p>
+        <p>Open a learnerâ€™s task or print the student-facing version for paper use.</p>
       </section>
 
       <button className="cycle-print-shortcut" onClick={onOpenPrint} type="button">
-        <span aria-hidden="true">▤</span>
+        <span aria-hidden="true">â–¤</span>
         <span>
           <strong>Print student task sheets</strong>
           <small>Choose Jack, Remi, or both</small>
         </span>
-        <span aria-hidden="true">→</span>
+        <span aria-hidden="true">â†’</span>
       </button>
 
       <div className="cycle-learner-list">
@@ -931,18 +936,19 @@ function LearnersView({
 }
 
 type StudentPrintCenterProps = {
+  learningTasks: LearningTask[];
   onBack: () => void;
   today: string;
 };
 
-function StudentPrintCenter({ onBack, today }: StudentPrintCenterProps) {
+function StudentPrintCenter({ learningTasks, onBack, today }: StudentPrintCenterProps) {
   const [selectedIds, setSelectedIds] = useState<LearningTaskId[]>(
     learningTasks.map((task) => task.id),
   );
 
   const selectedTasks = useMemo(
     () => learningTasks.filter((task) => selectedIds.includes(task.id)),
-    [selectedIds],
+    [learningTasks, selectedIds],
   );
 
   function toggleSelection(taskId: LearningTaskId) {
@@ -956,10 +962,10 @@ function StudentPrintCenter({ onBack, today }: StudentPrintCenterProps) {
   return (
     <div className="cycle-shell print-center">
       <div className="no-print">
-        <button className="cycle-back-button" onClick={onBack} type="button">← Back to tools</button>
+        <button className="cycle-back-button" onClick={onBack} type="button">â† Back to tools</button>
         <section className="cycle-page-heading">
           <p className="cycle-eyebrow">Parent print center</p>
-          <h1>Print today’s student tasks.</h1>
+          <h1>Print todayâ€™s student tasks.</h1>
           <p>The printed page contains only what the student needs: the task, materials, time, and steps.</p>
         </section>
 
@@ -979,7 +985,7 @@ function StudentPrintCenter({ onBack, today }: StudentPrintCenterProps) {
               />
               <span>
                 <strong>{task.owner}</strong>
-                <small>{task.title} · {task.duration}</small>
+                <small>{task.title} Â· {task.duration}</small>
               </span>
             </label>
           ))}
@@ -1004,13 +1010,13 @@ function StudentPrintCenter({ onBack, today }: StudentPrintCenterProps) {
               </div>
               <p>{today}</p>
             </header>
-            <p className="student-print-sheet__eyebrow">Today’s work</p>
+            <p className="student-print-sheet__eyebrow">Todayâ€™s work</p>
             <h1>{task.owner}</h1>
             <section>
               <span className="student-print-checkbox" aria-hidden="true" />
               <div>
                 <h2>{task.title}</h2>
-                <p>{task.duration} · {task.mode}</p>
+                <p>{task.duration} Â· {task.mode}</p>
               </div>
             </section>
             <div className="student-print-grid">
@@ -1036,7 +1042,9 @@ function StudentPrintCenter({ onBack, today }: StudentPrintCenterProps) {
 }
 
 type ToolsViewProps = {
+  activeCurriculumId: string | null;
   approvalStatus: ApprovalStatus;
+  curricula: PersistedCurriculumRecord[];
   importedLessonCount: number;
   onImport: () => void;
   onOpenApproval: () => void;
@@ -1045,12 +1053,15 @@ type ToolsViewProps = {
   onOpenPrint: () => void;
   onRecenter: () => void;
   onReset: () => void;
+  onSelectCurriculum: (curriculumId: string) => void;
   prepComplete: boolean;
   recenterChoice: string | null;
 };
 
 function ToolsView({
+  activeCurriculumId,
   approvalStatus,
+  curricula,
   importedLessonCount,
   onImport,
   onOpenApproval,
@@ -1059,6 +1070,7 @@ function ToolsView({
   onOpenPrint,
   onRecenter,
   onReset,
+  onSelectCurriculum,
   prepComplete,
   recenterChoice,
 }: ToolsViewProps) {
@@ -1070,17 +1082,39 @@ function ToolsView({
         <p>Printing, preparation, decisions, and curriculum tools stay outside the active learning sequence.</p>
       </section>
 
+
+      {curricula.length > 0 ? (
+        <section className="cycle-boundary-note" aria-label="Active curriculum">
+          <span aria-hidden="true">□</span>
+          <div>
+            <strong>Active curriculum source</strong>
+            <p>Selecting a different saved curriculum changes Start Here, the sequence, materials, print sheets, and tomorrow prep.</p>
+            <div className="cycle-secondary-action-row">
+              {curricula.map((curriculum) => (
+                <button
+                  className={curriculum.id === activeCurriculumId ? 'cycle-primary-button' : 'cycle-secondary-button'}
+                  key={curriculum.id}
+                  onClick={() => onSelectCurriculum(curriculum.id)}
+                  type="button"
+                >
+                  {curriculum.source.fileName}
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
       <div className="cycle-tool-list">
-        <ToolButton icon="▤" label="Print student task sheets" detail="Choose Jack, Remi, or both" onClick={onOpenPrint} />
-        <ToolButton icon="↗" label="Get ready for tomorrow" detail={prepComplete ? 'Tomorrow is ready' : 'Post-day preparation waiting'} onClick={onOpenPrep} />
-        <ToolButton icon="↺" label="Recenter today" detail={recenterChoice ?? 'Late start, less time, or an overwhelmed learner'} onClick={onRecenter} />
-        <ToolButton icon="✓" label="Parent decisions" detail={approvalStatus === 'pending' ? '1 recommendation waiting' : 'Latest recommendation decided'} onClick={onOpenApproval} />
-        <ToolButton icon="＋" label="Import curriculum" detail={importedLessonCount > 0 ? `${importedLessonCount} imported lessons ready` : 'Add a curriculum PDF or photo'} onClick={onImport} />
-        <ToolButton icon="▥" label="Curriculum library" detail="Open your family bookshelf and source details" onClick={onOpenLibrary} />
+        <ToolButton icon="â–¤" label="Print student task sheets" detail={importedLessonCount > 0 ? 'Generated from active curriculum' : 'Import curriculum first'} onClick={onOpenPrint} />
+        <ToolButton icon="â†—" label="Get ready for tomorrow" detail={prepComplete ? 'Tomorrow is ready' : 'Post-day preparation waiting'} onClick={onOpenPrep} />
+        <ToolButton icon="â†º" label="Recenter today" detail={recenterChoice ?? 'Late start, less time, or an overwhelmed learner'} onClick={onRecenter} />
+        <ToolButton icon="âœ“" label="Parent decisions" detail={approvalStatus === 'pending' ? '1 recommendation waiting' : 'Latest recommendation decided'} onClick={onOpenApproval} />
+        <ToolButton icon="ï¼‹" label="Import curriculum" detail={importedLessonCount > 0 ? `${importedLessonCount} saved curriculum source${importedLessonCount === 1 ? '' : 's'}` : 'Add a curriculum PDF or photo'} onClick={onImport} />
+        <ToolButton icon="â–¥" label="Curriculum library" detail="Open your family bookshelf and source details" onClick={onOpenLibrary} />
       </div>
 
       <button className="cycle-reset-button" onClick={onReset} type="button">
-        Start the next prototype day
+        Reset today for active curriculum
       </button>
     </div>
   );
@@ -1101,7 +1135,7 @@ function ToolButton({ detail, icon, label, onClick }: ToolButtonProps) {
         <strong>{label}</strong>
         <small>{detail}</small>
       </span>
-      <span aria-hidden="true">→</span>
+      <span aria-hidden="true">â†’</span>
     </button>
   );
 }
@@ -1114,7 +1148,7 @@ type AttentionStripProps = {
 function AttentionStrip({ approvalStatus, onOpen }: AttentionStripProps) {
   return (
     <button className={`cycle-attention cycle-attention--${approvalStatus}`} onClick={onOpen} type="button">
-      <span aria-hidden="true">{approvalStatus === 'pending' ? '!' : '✓'}</span>
+      <span aria-hidden="true">{approvalStatus === 'pending' ? '!' : 'âœ“'}</span>
       <span>
         <small>Needs your attention</small>
         <strong>
@@ -1122,11 +1156,11 @@ function AttentionStrip({ approvalStatus, onOpen }: AttentionStripProps) {
             ? 'Approve catch-up recommendation'
             : approvalStatus === 'approved'
               ? 'Catch-up recommendation approved'
-              : 'Today’s original plan kept'}
+              : 'Todayâ€™s original plan kept'}
         </strong>
         <span>{approvalStatus === 'pending' ? 'Nothing changes until you decide.' : 'Open to review or change the decision.'}</span>
       </span>
-      <span aria-hidden="true">→</span>
+      <span aria-hidden="true">â†’</span>
     </button>
   );
 }
@@ -1147,17 +1181,29 @@ function BottomNavigation({ activeView, onChange }: BottomNavigationProps) {
   return (
     <nav className="cycle-bottom-nav no-print" aria-label="Primary navigation">
       <button aria-current={currentTab === 'today' ? 'page' : undefined} onClick={() => onChange('today')} type="button">
-        <span aria-hidden="true">⌂</span>
+        <span aria-hidden="true">âŒ‚</span>
         Today
       </button>
       <button aria-current={currentTab === 'learners' ? 'page' : undefined} onClick={() => onChange('learners')} type="button">
-        <span aria-hidden="true">◉</span>
+        <span aria-hidden="true">â—‰</span>
         Learners
       </button>
       <button aria-current={currentTab === 'tools' ? 'page' : undefined} onClick={() => onChange('tools')} type="button">
-        <span aria-hidden="true">＋</span>
+        <span aria-hidden="true">ï¼‹</span>
         Tools
       </button>
     </nav>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
