@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { PersistedCurriculumRecord } from '../daily-cycle/dailyCyclePersistence';
 import type {
   ParentDecisionV2,
@@ -82,20 +82,52 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
       return;
     }
 
+    const debug = createImportFlowDebugTimer('CurriculumImportFlow.handleAnalyzeCurriculum');
+    debug.checkpoint('Import started', {
+      fileName: uploadedFile.name,
+      fileSize: uploadedFile.size,
+      fileType: uploadedFile.type,
+    });
+
+    debug.before('setCurrentAnalysisStepIndex(0), clear state, setStep(analyzing-source)');
     setCurrentAnalysisStepIndex(0);
     setAnalysisResult(null);
     setAnalysisError(null);
     setStep('analyzing-source');
+    debug.after('setCurrentAnalysisStepIndex(0), clear state, setStep(analyzing-source)');
 
     try {
-      const [result] = await Promise.all([
-        analyzeCurriculumForParentDecision(uploadedFile),
-        wait(minimumAnalysisDurationMs),
-      ]);
+      debug.before('create analysisPromise');
+      const analysisPromise = analyzeCurriculumForParentDecision(uploadedFile).then((result) => {
+        debug.after('analysisPromise resolved', {
+          curriculumRecordId: result.curriculumRecord.id,
+          learningTaskCount: result.curriculumRecord.dailyCycle.learningTasks.length,
+          prepTaskCount: result.curriculumRecord.dailyCycle.prepTasks.length,
+          readiness: result.decision.readiness.status,
+        });
+        return result;
+      });
+      debug.after('create analysisPromise');
 
+      debug.before('create minimumDurationPromise');
+      const minimumDurationPromise = wait(minimumAnalysisDurationMs).then(() => {
+        debug.after('minimumDurationPromise resolved');
+      });
+      debug.after('create minimumDurationPromise');
+
+      debug.before('await Promise.all([analysisPromise, minimumDurationPromise])');
+      const [result] = await Promise.all([analysisPromise, minimumDurationPromise]);
+      debug.after('await Promise.all([analysisPromise, minimumDurationPromise])');
+
+      debug.before('setAnalysisResult(result)');
       setAnalysisResult(result);
+      debug.after('setAnalysisResult(result)');
+
+      debug.before("setStep('parent-decision')");
       setStep('parent-decision');
-    } catch {
+      debug.after("setStep('parent-decision')");
+    } catch (error) {
+      console.error('[IterNest import] CurriculumImportFlow.handleAnalyzeCurriculum | caught error', error);
       setAnalysisError(
         'IterNest could not safely inspect this file in the browser. If this is a scanned curriculum PDF or photo, OCR is required before IterNest can build a reliable Decision Context.',
       );
@@ -104,12 +136,21 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
   }
 
   function handleApproveParentDecision() {
+    const debug = createImportFlowDebugTimer('CurriculumImportFlow.handleApproveParentDecision');
+    debug.checkpoint('approval handler invoked', { hasAnalysisResult: Boolean(analysisResult) });
+
     if (!analysisResult) {
+      debug.checkpoint('approval handler returned early: no analysisResult');
       return;
     }
 
+    debug.before('onApprove(analysisResult.curriculumRecord)');
     onApprove(analysisResult.curriculumRecord);
+    debug.after('onApprove(analysisResult.curriculumRecord)');
+
+    debug.before("setStep('approved')");
     setStep('approved');
+    debug.after("setStep('approved')");
   }
 
   return (
@@ -418,4 +459,35 @@ function wait(durationMs: number) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, durationMs);
   });
+}
+
+type ImportFlowDebugDetails = Record<string, unknown>;
+
+function createImportFlowDebugTimer(scope: string) {
+  const startedAt = performance.now();
+  let lastAt = startedAt;
+
+  function log(label: string, details?: ImportFlowDebugDetails) {
+    const now = performance.now();
+    const elapsedMs = Math.round(now - startedAt);
+    const deltaMs = Math.round(now - lastAt);
+    lastAt = now;
+    console.info(`[IterNest import] ${scope} | ${label}`, {
+      elapsedMs,
+      deltaMs,
+      ...(details ?? {}),
+    });
+  }
+
+  return {
+    before(statement: string, details?: ImportFlowDebugDetails) {
+      log(`BEFORE ${statement}`, details);
+    },
+    after(statement: string, details?: ImportFlowDebugDetails) {
+      log(`AFTER ${statement}`, details);
+    },
+    checkpoint(label: string, details?: ImportFlowDebugDetails) {
+      log(label, details);
+    },
+  };
 }

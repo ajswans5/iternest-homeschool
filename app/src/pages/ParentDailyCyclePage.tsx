@@ -1209,3 +1209,34 @@ function BottomNavigation({ activeView, onChange }: BottomNavigationProps) {
 
 
 
+
+type DailyCyclePageDebugDetails = Record<string, unknown>;
+
+function createDailyCyclePageDebugTimer(scope: string) {
+  const startedAt = performance.now();
+  let lastAt = startedAt;
+
+  function log(label: string, details?: DailyCyclePageDebugDetails) {
+    const now = performance.now();
+    const elapsedMs = Math.round(now - startedAt);
+    const deltaMs = Math.round(now - lastAt);
+    lastAt = now;
+    console.info(`[IterNest import] ${scope} | ${label}`, {
+      elapsedMs,
+      deltaMs,
+      ...(details ?? {}),
+    });
+  }
+
+  return {
+    before(statement: string, details?: DailyCyclePageDebugDetails) {
+      log(`BEFORE ${statement}`, details);
+    },
+    after(statement: string, details?: DailyCyclePageDebugDetails) {
+      log(`AFTER ${statement}`, details);
+    },
+    checkpoint(label: string, details?: DailyCyclePageDebugDetails) {
+      log(label, details);
+    },
+  };
+}

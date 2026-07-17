@@ -1,4 +1,4 @@
-﻿import type {
+import type {
   CurriculumConfidence,
   CurriculumEvidence,
   CurriculumReasoningResult,
@@ -59,11 +59,47 @@ const relationshipTypes: CurriculumRepresentationRelationship['relationshipType'
 export async function analyzeCurriculumForParentDecision(
   file: File,
 ): Promise<CurriculumImportDecisionResult> {
+  const debug = createImportDebugTimer('analyzeCurriculumForParentDecision');
+  debug.checkpoint('start', { fileName: file.name, fileSize: file.size, fileType: file.type });
+
+  debug.before('await analyzeUploadedCurriculumFile(file)');
   const sourceAnalysis = await analyzeUploadedCurriculumFile(file);
+  debug.after('await analyzeUploadedCurriculumFile(file)', {
+    readableTextLength: sourceAnalysis.readableTextLength,
+    sourceLineCount: sourceAnalysis.sourceLines.length,
+    lessonHeadingCount: sourceAnalysis.lessonHeadingsFound.length,
+    limitationCount: sourceAnalysis.limitations.length,
+  });
+
+  debug.before('buildSingleLessonModel(sourceAnalysis)');
   const lessonModel = buildSingleLessonModel(sourceAnalysis);
-  const curriculumSummary = buildCurriculumIntelligenceSummary(
-    buildImportCurriculumReasoningResult(sourceAnalysis, lessonModel?.sourceEvidence ?? []),
+  debug.after('buildSingleLessonModel(sourceAnalysis)', {
+    hasLessonModel: Boolean(lessonModel),
+    sourceEvidenceCount: lessonModel?.sourceEvidence.length ?? 0,
+    teacherTaskCount: lessonModel?.teacherResponsibilities.length ?? 0,
+    studentTaskCount: lessonModel?.studentResponsibilities.length ?? 0,
+    materialCount: lessonModel?.materialsRequired.length ?? 0,
+  });
+
+  debug.before('buildImportCurriculumReasoningResult(...)');
+  const curriculumReasoningResult = buildImportCurriculumReasoningResult(
+    sourceAnalysis,
+    lessonModel?.sourceEvidence ?? [],
   );
+  debug.after('buildImportCurriculumReasoningResult(...)', {
+    applicablePathCount: curriculumReasoningResult.applicablePaths.length,
+    blockedPathCount: curriculumReasoningResult.blockedPaths.length,
+    traceCount: curriculumReasoningResult.traces.length,
+  });
+
+  debug.before('buildCurriculumIntelligenceSummary(curriculumReasoningResult)');
+  const curriculumSummary = buildCurriculumIntelligenceSummary(curriculumReasoningResult);
+  debug.after('buildCurriculumIntelligenceSummary(curriculumReasoningResult)', {
+    summaryStatus: curriculumSummary.summaryStatus,
+    unknownCount: curriculumSummary.unknowns.length,
+  });
+
+  debug.before('buildFamilyUnderstandingSummary(buildFamilyUnderstandingProfile(...))');
   const familySummary = buildFamilyUnderstandingSummary(
     buildFamilyUnderstandingProfile({
       id: `import-family-profile-${slugify(sourceAnalysis.fileName)}`,
@@ -71,6 +107,12 @@ export async function analyzeCurriculumForParentDecision(
       observations: [],
     }),
   );
+  debug.after('buildFamilyUnderstandingSummary(buildFamilyUnderstandingProfile(...))', {
+    summaryStatus: familySummary.summaryStatus,
+    unknownCount: familySummary.unknowns.length,
+  });
+
+  debug.before('buildLearnerUnderstandingSummary(buildLearnerUnderstandingProfile(...))');
   const learnerSummary = buildLearnerUnderstandingSummary(
     buildLearnerUnderstandingProfile({
       id: `import-learner-profile-${slugify(sourceAnalysis.fileName)}`,
@@ -79,6 +121,12 @@ export async function analyzeCurriculumForParentDecision(
       observations: [],
     }),
   );
+  debug.after('buildLearnerUnderstandingSummary(buildLearnerUnderstandingProfile(...))', {
+    summaryStatus: learnerSummary.summaryStatus,
+    unknownCount: learnerSummary.unknowns.length,
+  });
+
+  debug.before('buildLearningContinuitySummary(buildLearningContinuityProfile(...))');
   const learningContinuitySummary = buildLearningContinuitySummary(
     buildLearningContinuityProfile({
       id: `import-continuity-profile-${slugify(sourceAnalysis.fileName)}`,
@@ -88,6 +136,12 @@ export async function analyzeCurriculumForParentDecision(
       observations: [],
     }),
   );
+  debug.after('buildLearningContinuitySummary(buildLearningContinuityProfile(...))', {
+    summaryStatus: learningContinuitySummary.summaryStatus,
+    unknownCount: learningContinuitySummary.unknowns.length,
+  });
+
+  debug.before('assembleDecisionContext(...)');
   const decisionContext = assembleDecisionContext({
     id: `curriculum-import-decision-context-${slugify(sourceAnalysis.fileName)}`,
     curriculum: curriculumSummary,
@@ -95,15 +149,37 @@ export async function analyzeCurriculumForParentDecision(
     learner: learnerSummary,
     learningContinuity: learningContinuitySummary,
   });
+  debug.after('assembleDecisionContext(...)', {
+    contextStatus: decisionContext.contextStatus,
+    sourceSummaryCount: decisionContext.sourceSummaries.length,
+    unknownCount: decisionContext.unknowns.length,
+  });
+
+  debug.before('buildParentDecisionV2FromDecisionContext(decisionContext)');
   const decision = buildParentDecisionV2FromDecisionContext(decisionContext);
+  debug.after('buildParentDecisionV2FromDecisionContext(decisionContext)', {
+    readiness: decision.readiness.status,
+    attentionCount: decision.attentionRequired.length,
+    uncertaintyCount: decision.unresolvedUncertainty.length,
+  });
+
+  debug.before('buildPersistedCurriculumRecord(...)');
+  const curriculumRecord = buildPersistedCurriculumRecord({
+    sourceAnalysis,
+    lessonModel,
+    decision,
+  });
+  debug.after('buildPersistedCurriculumRecord(...)', {
+    curriculumRecordId: curriculumRecord.id,
+    learningTaskCount: curriculumRecord.dailyCycle.learningTasks.length,
+    prepTaskCount: curriculumRecord.dailyCycle.prepTasks.length,
+  });
+
+  debug.checkpoint('returning CurriculumImportDecisionResult');
 
   return {
     decision,
-    curriculumRecord: buildPersistedCurriculumRecord({
-      sourceAnalysis,
-      lessonModel,
-      decision,
-    }),
+    curriculumRecord,
   };
 }
 
@@ -325,4 +401,35 @@ function slugify(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '') || 'unknown';
+}
+
+type ImportDebugDetails = Record<string, unknown>;
+
+function createImportDebugTimer(scope: string) {
+  const startedAt = performance.now();
+  let lastAt = startedAt;
+
+  function log(label: string, details?: ImportDebugDetails) {
+    const now = performance.now();
+    const elapsedMs = Math.round(now - startedAt);
+    const deltaMs = Math.round(now - lastAt);
+    lastAt = now;
+    console.info(`[IterNest import] ${scope} | ${label}`, {
+      elapsedMs,
+      deltaMs,
+      ...(details ?? {}),
+    });
+  }
+
+  return {
+    before(statement: string, details?: ImportDebugDetails) {
+      log(`BEFORE ${statement}`, details);
+    },
+    after(statement: string, details?: ImportDebugDetails) {
+      log(`AFTER ${statement}`, details);
+    },
+    checkpoint(label: string, details?: ImportDebugDetails) {
+      log(label, details);
+    },
+  };
 }

@@ -99,7 +99,13 @@ export function loadPersistedHomeschoolData(): PersistedHomeschoolData {
 }
 
 export function savePersistedHomeschoolData(data: PersistedHomeschoolData) {
-  window.localStorage.setItem(DAILY_CYCLE_DATA_STORAGE_KEY, JSON.stringify(data));
+  const debug = createDailyCycleDebugTimer('savePersistedHomeschoolData');
+  debug.before('JSON.stringify(data)', { curriculumCount: data.curricula.length, activeCurriculumId: data.activeCurriculumId });
+  const serialized = JSON.stringify(data);
+  debug.after('JSON.stringify(data)', { serializedLength: serialized.length });
+  debug.before('window.localStorage.setItem(...)');
+  window.localStorage.setItem(DAILY_CYCLE_DATA_STORAGE_KEY, serialized);
+  debug.after('window.localStorage.setItem(...)');
 }
 
 export function emptyPersistedHomeschoolData(): PersistedHomeschoolData {
@@ -160,10 +166,23 @@ export function buildPersistedCurriculumRecord({
   lessonModel: LessonModel | null;
   decision: ParentDecisionV2;
 }): PersistedCurriculumRecord {
+  const debug = createDailyCycleDebugTimer('buildPersistedCurriculumRecord');
+  debug.checkpoint('start', {
+    fileName: sourceAnalysis.fileName,
+    hasLessonModel: Boolean(lessonModel),
+    readableTextLength: sourceAnalysis.readableTextLength,
+  });
+
+  debug.before('stable curriculum id construction');
   const id = `curriculum-${stableSlug(sourceAnalysis.fileName)}-${sourceAnalysis.readableTextLength}-${sourceAnalysis.lessonHeadingsFound.length}`;
   const dailyCycle = buildDailyCyclePlan(sourceAnalysis, lessonModel, id);
+  debug.after('buildDailyCyclePlan(sourceAnalysis, lessonModel, id)', {
+    learningTaskCount: dailyCycle.learningTasks.length,
+    prepTaskCount: dailyCycle.prepTasks.length,
+  });
 
-  return {
+  debug.before('PersistedCurriculumRecord object assembly');
+  const record: PersistedCurriculumRecord = {
     id,
     importedAt: new Date().toISOString(),
     source: {
@@ -195,6 +214,9 @@ export function buildPersistedCurriculumRecord({
     decision,
     dailyCycle,
   };
+  debug.after('PersistedCurriculumRecord object assembly');
+
+  return record;
 }
 
 function buildDailyCyclePlan(
@@ -202,29 +224,55 @@ function buildDailyCyclePlan(
   lessonModel: LessonModel | null,
   curriculumId: string,
 ): PersistedDailyCyclePlan {
+  const debug = createDailyCycleDebugTimer('buildDailyCyclePlan');
+  debug.checkpoint('start', {
+    curriculumId,
+    hasLessonModel: Boolean(lessonModel),
+    readableTextLength: sourceAnalysis.readableTextLength,
+  });
+
+  debug.before('guard: no lessonModel or no readable text');
   if (!lessonModel || sourceAnalysis.readableTextLength === 0) {
+    debug.after('guard returned empty daily-cycle plan');
     return { learningTasks: [], prepTasks: [] };
   }
+  debug.after('guard passed');
 
+  debug.before('lessonTitle resolution');
   const lessonTitle =
     lessonModel.title.value ??
     sourceAnalysis.lessonHeadingsFound[0]?.value ??
     sourceAnalysis.fileName;
+  debug.after('lessonTitle resolution', { lessonTitle });
+
+  debug.before('subject resolution');
   const subject =
     lessonModel.subject.value ?? sourceAnalysis.subjectsFound[0]?.value ?? 'Curriculum';
+  debug.after('subject resolution', { subject });
+
+  debug.before('duration resolution');
   const duration = lessonModel.estimatedDurationMinutes.value
     ? `${lessonModel.estimatedDurationMinutes.value} minutes`
     : 'Time not stated';
+  debug.after('duration resolution', { duration });
+
+  debug.before('materials normalization');
   const materials = unique(
     lessonModel.materialsRequired
       .map((item) => normalizeMaterialLabel(item.text))
       .filter(Boolean),
   );
+  debug.after('materials normalization', { materialCount: materials.length });
+
+  debug.before('orderLearningWork(...)');
   const learningWork = orderLearningWork(lessonModel, [
     ...lessonModel.teacherResponsibilities,
     ...lessonModel.studentResponsibilities,
     ...lessonModel.reviewsAndAssessments,
   ]);
+  debug.after('orderLearningWork(...)', { learningWorkCount: learningWork.length });
+
+  debug.before('learningWork.map(toLearningTask)');
   const learningTasks = learningWork.map((item, index) =>
     toLearningTask(
       item,
@@ -236,25 +284,35 @@ function buildDailyCyclePlan(
       materials,
     ),
   );
+  debug.after('learningWork.map(toLearningTask)', { learningTaskCount: learningTasks.length });
 
+  debug.before('guard: learningTasks.length === 0');
   if (learningTasks.length === 0) {
+    debug.after('guard returned empty prep plan');
     return { learningTasks: [], prepTasks: [] };
   }
+  debug.after('guard passed');
 
+  debug.before('hasPrintableTasks calculation');
   const hasPrintableTasks = learningTasks.some(
     (task) => task.audience === 'student' || task.audience === 'shared',
   );
+  debug.after('hasPrintableTasks calculation', { hasPrintableTasks });
 
-  return {
-    learningTasks,
-    prepTasks: buildPrepTasks(
+  debug.before('buildPrepTasks(...)');
+  const prepTasks = buildPrepTasks(
       sourceAnalysis,
       lessonTitle,
       subject,
       materials,
       curriculumId,
       hasPrintableTasks,
-    ),
+  );
+  debug.after('buildPrepTasks(...)', { prepTaskCount: prepTasks.length });
+
+  return {
+    learningTasks,
+    prepTasks,
   };
 }
 
@@ -401,4 +459,35 @@ function stableSlug(value: string) {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '') || 'unknown'
   );
+}
+
+type DailyCycleDebugDetails = Record<string, unknown>;
+
+function createDailyCycleDebugTimer(scope: string) {
+  const startedAt = performance.now();
+  let lastAt = startedAt;
+
+  function log(label: string, details?: DailyCycleDebugDetails) {
+    const now = performance.now();
+    const elapsedMs = Math.round(now - startedAt);
+    const deltaMs = Math.round(now - lastAt);
+    lastAt = now;
+    console.info(`[IterNest import] ${scope} | ${label}`, {
+      elapsedMs,
+      deltaMs,
+      ...(details ?? {}),
+    });
+  }
+
+  return {
+    before(statement: string, details?: DailyCycleDebugDetails) {
+      log(`BEFORE ${statement}`, details);
+    },
+    after(statement: string, details?: DailyCycleDebugDetails) {
+      log(`AFTER ${statement}`, details);
+    },
+    checkpoint(label: string, details?: DailyCycleDebugDetails) {
+      log(label, details);
+    },
+  };
 }
