@@ -25,9 +25,36 @@ type PdfTextItem = {
   transform?: number[];
 };
 
+type PdfPageLike = {
+  getTextContent: () => Promise<{ items: unknown[] }>;
+  cleanup?: () => void;
+};
+
+type PdfDocumentLike = {
+  numPages: number;
+  getPage: (pageNumber: number) => Promise<PdfPageLike>;
+  cleanup?: () => void;
+  destroy?: () => Promise<void>;
+};
+
+type PdfLoadingTaskLike = {
+  promise: Promise<PdfDocumentLike>;
+  destroy?: () => Promise<void>;
+};
+
+type PdfJsLike = {
+  GlobalWorkerOptions: {
+    workerSrc: string;
+  };
+  getDocument: (options: Record<string, unknown>) => PdfLoadingTaskLike;
+};
+
+const INITIAL_IMPORT_PAGE_LIMIT = 40;
+
 const knownSubjects = [
   'Arithmetic',
   'Math',
+  'Mathematics',
   'Reading',
   'Literature',
   'Latin',
@@ -35,17 +62,25 @@ const knownSubjects = [
   'Writing',
   'Composition',
   'Science',
+  'Natural Science',
   'History',
   'Geography',
   'Spelling',
   'Bible',
+  'Christian Studies',
+  'Classical Studies',
+  'Poetry',
+  'Copybook',
+  'Cursive',
+  'Art',
+  'Music',
 ];
 
 const sectionPatterns = [
   { label: 'Table of Contents', kind: 'table of contents', pattern: /table of contents|contents/i },
   { label: 'Weekly Schedule', kind: 'weekly schedule', pattern: /weekly schedule|week\s+\d+|daily schedule/i },
   { label: 'Lesson Plans', kind: 'lesson plans', pattern: /lesson plans?|lesson\s+\d+/i },
-  { label: 'Answer Key', kind: 'answer key', pattern: /answer key|answers/i },
+  { label: 'Answer Key', kind: 'answer key', pattern: /answer key|teacher key|answers/i },
   { label: 'Assessments', kind: 'assessments', pattern: /assessment|test|quiz|exam/i },
   { label: 'Appendix', kind: 'appendix', pattern: /appendix/i },
   { label: 'Resources', kind: 'resources', pattern: /resources|materials|supplies/i },
@@ -102,7 +137,7 @@ async function extractReadableText(file: File): Promise<TextExtractionResult> {
   if (file.type.startsWith('image/')) {
     return buildExtractionResult('', null, [
       'This is an image file. OCR is required before IterNest can read curriculum text from it.',
-      'The upload can be stored, but this MVP will not pretend to understand photo text without OCR.',
+      'The upload can be stored, but IterNest will not pretend to understand photo text without OCR.',
     ]);
   }
 
@@ -117,52 +152,140 @@ async function extractReadableText(file: File): Promise<TextExtractionResult> {
   }
 
   return buildExtractionResult('', null, [
-    'This file type is not readable in the MVP import test yet. IterNest currently supports curriculum PDFs with selectable text and reports when OCR is required.',
+    'This file type is not readable yet. IterNest currently supports curriculum PDFs with selectable text and reports when OCR is required.',
   ]);
 }
 
 async function extractPdfText(file: File): Promise<TextExtractionResult> {
-  const pdfjs = await import('pdfjs-dist');
-  const pdfWorker = await import('pdfjs-dist/build/pdf.worker.mjs?url');
+  const originalBytes = new Uint8Array(await file.arrayBuffer());
+  const attempts = [
+    { label: 'Safari-compatible PDF reader', load: loadLegacyPdfJs },
+    { label: 'standard PDF reader', load: loadStandardPdfJs },
+  ];
+  let lastError: unknown = null;
+  let bestResult: TextExtractionResult | null = null;
 
-  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker.default;
+  for (const attempt of attempts) {
+    try {
+      const pdfjs = await attempt.load();
+      const result = await extractPdfTextWithReader(pdfjs, originalBytes, attempt.label);
 
-  const limitations: string[] = [];
-  const buffer = await file.arrayBuffer();
-  const document = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
-  const parsedLines: ParsedLine[] = [];
+      if (!bestResult || result.text.length > bestResult.text.length) {
+        bestResult = result;
+      }
 
-  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
-    const page = await document.getPage(pageNumber);
-    const content = await page.getTextContent();
-    parsedLines.push(...getPdfPageLines(content.items as PdfTextItem[], pageNumber));
+      if (result.text.length >= 200) {
+        return result;
+      }
+    } catch (error) {
+      lastError = error;
+    }
   }
 
-  const readableText = cleanText(parsedLines.map((line) => line.text).join('\n'));
-
-  if (readableText.length >= 200) {
-    limitations.push(
-      'This PDF has selectable text. IterNest read the PDF text layer directly; OCR was not needed for this upload.',
-    );
-  } else {
-    limitations.push(
-      'This PDF appears to have little or no selectable text. OCR is required before IterNest can understand the curriculum content.',
-    );
-    limitations.push(
-      'IterNest will not ask parents to reformat this curriculum; a later OCR step should handle scanned manuals and photo-based PDFs.',
-    );
+  if (bestResult) {
+    return bestResult;
   }
 
-  return {
-    text: readableText,
-    lines: parsedLines,
-    pageCount: document.numPages,
-    limitations,
-  };
+  return buildExtractionResult('', null, [
+    describePdfFailure(lastError),
+    'The file was not treated as an OCR failure automatically because this error may come from browser PDF support, encryption, or a damaged download.',
+  ]);
+}
+
+async function loadLegacyPdfJs(): Promise<PdfJsLike> {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs') as unknown as PdfJsLike;
+  const worker = await import('pdfjs-dist/legacy/build/pdf.worker.mjs?url');
+  pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+  return pdfjs;
+}
+
+async function loadStandardPdfJs(): Promise<PdfJsLike> {
+  const pdfjs = await import('pdfjs-dist') as unknown as PdfJsLike;
+  const worker = await import('pdfjs-dist/build/pdf.worker.mjs?url');
+  pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+  return pdfjs;
+}
+
+async function extractPdfTextWithReader(
+  pdfjs: PdfJsLike,
+  originalBytes: Uint8Array,
+  readerLabel: string,
+): Promise<TextExtractionResult> {
+  const loadingTask = pdfjs.getDocument({
+    data: originalBytes.slice(),
+    isEvalSupported: false,
+    stopAtErrors: false,
+    useWasm: false,
+    useWorkerFetch: false,
+  });
+  let document: PdfDocumentLike | null = null;
+
+  try {
+    document = await loadingTask.promise;
+    const parsedLines: ParsedLine[] = [];
+    const limitations: string[] = [];
+    const pageErrors: string[] = [];
+    const pagesToRead = Math.min(document.numPages, INITIAL_IMPORT_PAGE_LIMIT);
+
+    for (let pageNumber = 1; pageNumber <= pagesToRead; pageNumber += 1) {
+      let page: PdfPageLike | null = null;
+
+      try {
+        page = await document.getPage(pageNumber);
+        const textContent = await page.getTextContent();
+        parsedLines.push(
+          ...getPdfPageLines(textContent.items as PdfTextItem[], pageNumber),
+        );
+      } catch (error) {
+        pageErrors.push(`Page ${pageNumber}: ${errorMessage(error)}`);
+      } finally {
+        page?.cleanup?.();
+      }
+
+      if (pageNumber % 4 === 0) {
+        await yieldToBrowser();
+      }
+    }
+
+    const readableText = cleanText(parsedLines.map((line) => line.text).join('\n'));
+
+    if (readableText.length >= 200) {
+      limitations.push(
+        `Selectable text was detected using the ${readerLabel}; OCR was not needed for this import.`,
+      );
+    } else {
+      limitations.push(
+        'This PDF exposed little or no readable text. OCR may be required before IterNest can understand the curriculum content.',
+      );
+    }
+
+    if (document.numPages > pagesToRead) {
+      limitations.push(
+        `This mobile-safe import pass read the first ${pagesToRead} of ${document.numPages} pages. It is intended to identify the curriculum and first usable lesson without crashing the browser.`,
+      );
+    }
+
+    if (pageErrors.length > 0) {
+      limitations.push(
+        `${pageErrors.length} page${pageErrors.length === 1 ? '' : 's'} could not be read during this pass: ${pageErrors.slice(0, 3).join(' | ')}`,
+      );
+    }
+
+    return {
+      text: readableText,
+      lines: parsedLines,
+      pageCount: document.numPages,
+      limitations,
+    };
+  } finally {
+    safelyCleanup(document);
+    await safelyDestroy(document);
+    await safelyDestroy(loadingTask);
+  }
 }
 
 function getPdfPageLines(items: PdfTextItem[], pageNumber: number): ParsedLine[] {
-  const lineMap = new Map<number, string[]>();
+  const lineMap = new Map<number, Array<{ x: number; text: string }>>();
 
   items.forEach((item) => {
     const text = item.str?.replace(/\s+/g, ' ').trim();
@@ -171,10 +294,11 @@ function getPdfPageLines(items: PdfTextItem[], pageNumber: number): ParsedLine[]
       return;
     }
 
+    const xPosition = item.transform?.[4] ?? 0;
     const yPosition = item.transform?.[5] ?? 0;
     const lineKey = Math.round(yPosition);
     const existingLine = lineMap.get(lineKey) ?? [];
-    existingLine.push(text);
+    existingLine.push({ x: xPosition, text });
     lineMap.set(lineKey, existingLine);
   });
 
@@ -183,9 +307,69 @@ function getPdfPageLines(items: PdfTextItem[], pageNumber: number): ParsedLine[]
     .map(([, parts], index) => ({
       lineNumber: index + 1,
       pageNumber,
-      text: parts.join(' '),
+      text: parts
+        .sort((first, second) => first.x - second.x)
+        .map((part) => part.text)
+        .join(' '),
     }))
     .filter((line) => line.text.length > 0);
+}
+
+function describePdfFailure(error: unknown) {
+  const name = errorName(error);
+  const message = errorMessage(error);
+
+  if (/password/i.test(name) || /password/i.test(message)) {
+    return 'This PDF is password-protected. Open or export an unlocked copy before importing it into IterNest.';
+  }
+
+  if (/invalidpdf|formaterror|invalid pdf|corrupt/i.test(`${name} ${message}`)) {
+    return 'The browser could not parse this PDF. The download may be incomplete or the file may use a PDF format this reader cannot process.';
+  }
+
+  if (/worker|module|import|wasm/i.test(`${name} ${message}`)) {
+    return `The browser PDF reader could not start correctly (${message}). This is a reader compatibility problem, not proof that the curriculum needs OCR.`;
+  }
+
+  return `IterNest could not open this PDF in the browser (${message}). The file may still contain selectable text.`;
+}
+
+function errorName(error: unknown) {
+  return error instanceof Error && error.name ? error.name : 'PDF error';
+}
+
+function errorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return error;
+  }
+
+  return 'Unknown PDF reader error';
+}
+
+function safelyCleanup(value: { cleanup?: () => void } | null) {
+  try {
+    value?.cleanup?.();
+  } catch {
+    // Cleanup failures must not replace the actual import result.
+  }
+}
+
+async function safelyDestroy(value: { destroy?: () => Promise<void> } | null) {
+  try {
+    await value?.destroy?.();
+  } catch {
+    // Cleanup failures must not replace the actual import result.
+  }
+}
+
+function yieldToBrowser() {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, 0);
+  });
 }
 
 function buildExtractionResult(
@@ -241,26 +425,27 @@ function findSubjects(lines: ParsedLine[]): SourceFinding[] {
       return [];
     }
 
-    return [
-      {
-        id: `subject-${subject.toLowerCase()}`,
-        label: 'Subject found',
-        value: subject,
-        sourceLocation: formatSourceLocation(match),
-        evidence: match.text,
-      },
-    ];
+    return [{
+      id: `subject-${subject.toLowerCase().replace(/\s+/g, '-')}`,
+      label: 'Subject found',
+      value: subject,
+      sourceLocation: formatSourceLocation(match),
+      evidence: match.text,
+    }];
   });
 }
 
 function findLessonHeadings(lines: ParsedLine[]): SourceFinding[] {
   return lines
-    .filter(({ text }) => /\b(lesson|week|day)\s+\d+[a-z]?\b/i.test(text))
-    .slice(0, 20)
+    .filter(({ text }) =>
+      /\b(lesson|week|day)\s+\d+[a-z]?\b/i.test(text) ||
+      /\b(first|second|third|fourth)\s+week\b/i.test(text),
+    )
+    .slice(0, 30)
     .map((line, index) => ({
       id: `lesson-heading-${index + 1}`,
       label: 'Lesson heading found',
-      value: line.text.length > 90 ? `${line.text.slice(0, 87)}...` : line.text,
+      value: line.text.length > 120 ? `${line.text.slice(0, 117)}...` : line.text,
       sourceLocation: formatSourceLocation(line),
       evidence: line.text,
     }));
@@ -293,8 +478,8 @@ function findStructuralFindings(
       sourceLocation: 'PDF text layer',
       evidence:
         extraction.text.length >= 200
-          ? 'PDF.js extracted readable text from the document.'
-          : 'PDF.js could not extract enough readable text from the document.',
+          ? 'The browser PDF reader extracted readable text from the document.'
+          : 'The browser PDF reader could not extract enough readable text from the document.',
     });
   }
 
@@ -323,10 +508,11 @@ function buildInferences(
   if (sections.some((section) => section.value === 'Weekly Schedule')) {
     inferences.push({
       id: 'weekly-schedule-reference',
-      guess: 'This may contain planning/reference structure rather than full lesson instructions.',
+      guess: 'This may contain planning or orchestration structure rather than one standalone lesson.',
       why: 'A weekly schedule section was directly detected.',
       confidence: 'review',
-      sourceLocation: sections.find((section) => section.value === 'Weekly Schedule')?.sourceLocation ?? 'Unknown',
+      sourceLocation:
+        sections.find((section) => section.value === 'Weekly Schedule')?.sourceLocation ?? 'Unknown',
     });
   }
 
@@ -343,8 +529,8 @@ function buildInferences(
   if (lessonHeadings.length > 0) {
     inferences.push({
       id: 'sequential-lessons',
-      guess: 'This likely has sequential lesson content.',
-      why: 'Lesson/week/day headings were directly found in source order.',
+      guess: 'This likely contains sequential lesson or week content.',
+      why: 'Lesson, week, or day headings were directly found in source order.',
       confidence: 'review',
       sourceLocation: lessonHeadings[0].sourceLocation,
     });
@@ -360,12 +546,15 @@ function buildQuestions(
 ): SourceQuestion[] {
   const questions: SourceQuestion[] = [];
   const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+  const readerFailure = extraction.limitations.some((limitation) =>
+    /reader|parse|password|open this PDF|compatibility/i.test(limitation),
+  );
 
-  if ((file.type.startsWith('image/') || isPdf) && extraction.text.length < 200) {
+  if ((file.type.startsWith('image/') || isPdf) && extraction.text.length < 200 && !readerFailure) {
     questions.push({
       id: 'ocr-needed',
-      question: 'Is this curriculum scan/photo-based rather than selectable text?',
-      reason: 'I could not read enough text from the upload. OCR is required before I can map it faithfully.',
+      question: 'Is this curriculum scan or photo-based rather than selectable text?',
+      reason: 'I could not read enough text from the upload. OCR may be required before I can map it faithfully.',
     });
   }
 
@@ -373,7 +562,7 @@ function buildQuestions(
     questions.push({
       id: 'lesson-plans',
       question: 'Does this upload include the actual lesson-plan pages?',
-      reason: 'I did not clearly find a lesson-plan section.',
+      reason: 'I did not clearly find a lesson-plan section in the pages read during this import pass.',
     });
   }
 
@@ -381,7 +570,7 @@ function buildQuestions(
     questions.push({
       id: 'answer-key',
       question: 'Is there a separate answer key or teacher reference file?',
-      reason: 'I did not clearly find an answer key in this upload.',
+      reason: 'I did not clearly find an answer key in the pages read during this import pass.',
     });
   }
 
@@ -396,20 +585,17 @@ function buildDraftBlueprint(
   if (subjects.length === 0 || lessonHeadings.length === 0) {
     return {
       status: 'not-ready',
-      summary:
-        'Not enough source text was understood to draft a curriculum blueprint safely.',
+      summary: 'Not enough source text was understood to draft a curriculum blueprint safely.',
       includedSubjects: subjects.map((subject) => subject.value),
-      nextStep: 'Use the readable curriculum source or OCR pipeline before drafting the blueprint.',
+      nextStep: 'Review the file limitation or use the OCR pipeline before drafting the blueprint.',
     };
   }
 
   return {
     status: questions.length > 0 ? 'not-ready' : 'draftable',
-    summary:
-      'A draft blueprint could be prepared from the directly detected subjects and lesson headings after parent review.',
+    summary: 'A draft blueprint can be prepared from directly detected subjects and lesson headings after parent review.',
     includedSubjects: subjects.map((subject) => subject.value),
-    nextStep:
-      'Review the direct findings and questions before allowing IterNest to build a blueprint.',
+    nextStep: 'Review the direct findings and questions before IterNest builds the curriculum blueprint.',
   };
 }
 
