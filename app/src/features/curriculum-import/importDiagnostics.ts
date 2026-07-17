@@ -64,6 +64,10 @@ export async function traceImportStep<T>(
       status,
       elapsedMs: elapsedSince(startedAt),
       error: describeImportError(error),
+      detail: {
+        ...(options.detail ?? {}),
+        thrownError: inspectImportError(error),
+      },
     });
     throw error;
   } finally {
@@ -102,7 +106,7 @@ export function reportImportProgress(
 
 export function describeImportError(error: unknown) {
   if (error instanceof Error) {
-    return `${error.name}: ${error.message}`;
+    return `${error.name}: ${error.message}${error.stack ? `\n${error.stack}` : ''}`;
   }
 
   if (typeof error === 'string') {
@@ -114,6 +118,69 @@ export function describeImportError(error: unknown) {
   } catch {
     return 'Unknown import error';
   }
+}
+
+export function inspectImportError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return {
+      type: typeof error,
+      message: describeImportError(error),
+      stack: null,
+      parsedStackFrames: [],
+    };
+  }
+
+  return {
+    name: error.name,
+    message: error.message,
+    stack: error.stack ?? null,
+    parsedStackFrames: parseStackFrames(error.stack),
+  };
+}
+
+function parseStackFrames(stack: string | undefined) {
+  if (!stack) {
+    return [];
+  }
+
+  return stack
+    .split('\n')
+    .slice(1, 12)
+    .map((rawFrame) => parseStackFrame(rawFrame.trim()));
+}
+
+function parseStackFrame(rawFrame: string) {
+  const chromeMatch = rawFrame.match(/^at\s+(?:(.*?)\s+\()?(.+?):(\d+):(\d+)\)?$/);
+
+  if (chromeMatch) {
+    return {
+      rawFrame,
+      functionName: chromeMatch[1] || null,
+      sourceFile: chromeMatch[2],
+      lineNumber: Number(chromeMatch[3]),
+      columnNumber: Number(chromeMatch[4]),
+    };
+  }
+
+  const safariMatch = rawFrame.match(/^(?:(.*?)@)?(.+?):(\d+):(\d+)$/);
+
+  if (safariMatch) {
+    return {
+      rawFrame,
+      functionName: safariMatch[1] || null,
+      sourceFile: safariMatch[2],
+      lineNumber: Number(safariMatch[3]),
+      columnNumber: Number(safariMatch[4]),
+    };
+  }
+
+  return {
+    rawFrame,
+    functionName: null,
+    sourceFile: null,
+    lineNumber: null,
+    columnNumber: null,
+  };
 }
 
 function elapsedSince(startedAt: number) {

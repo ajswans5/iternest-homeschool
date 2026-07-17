@@ -617,6 +617,12 @@ function ImportDiagnosticLog({ events }: { events: ImportDiagnosticEvent[] }) {
             <span>{event.label}</span>
             <small>{formatDiagnosticStatus(event)}</small>
             {event.error ? <small>{event.error}</small> : null}
+            {event.detail ? (
+              <details>
+                <summary>Technical details</summary>
+                <pre>{JSON.stringify(event.detail, null, 2)}</pre>
+              </details>
+            ) : null}
           </li>
         ))}
       </ol>

@@ -6,7 +6,12 @@ import type {
   SourceQuestion,
   UploadedCurriculumAnalysis,
 } from './types';
-import { reportImportProgress, traceImportStep, type ImportProgressReporter } from './importDiagnostics';
+import {
+  inspectImportError,
+  reportImportProgress,
+  traceImportStep,
+  type ImportProgressReporter,
+} from './importDiagnostics';
 
 type ParsedLine = {
   lineNumber: number;
@@ -313,20 +318,46 @@ async function extractPdfTextWithReader(
           },
           () => document?.getPage(pageNumber) ?? Promise.reject(new Error('PDF document was not available.')),
         );
-        const textContent = await traceImportStep(
-          {
-            stepId: `pdf-page-text-${slugify(readerLabel)}-${pageNumber}`,
-            label: `Reading text from PDF page ${pageNumber}`,
-            reporter: onProgress,
-            timeoutMs: 10000,
-            detail: { pageNumber, readerLabel },
-          },
-          () => page?.getTextContent() ?? Promise.reject(new Error('PDF page was not available.')),
-        );
+        reportImportProgress(onProgress, {
+          stepId: `pdf-page-text-preflight-${slugify(readerLabel)}-${pageNumber}`,
+          label: `Inspecting PDF page ${pageNumber} before text extraction`,
+          status: 'info',
+          detail: buildPdfTextExtractionPreflight({
+            page,
+            pageNumber,
+            readerLabel,
+            statement: 'page.getTextContent()',
+          }),
+        });
+        const textContent = await tracePdfTextContentCall({
+          onProgress,
+          page,
+          pageNumber,
+          readerLabel,
+        });
+        reportImportProgress(onProgress, {
+          stepId: `pdf-page-text-result-${slugify(readerLabel)}-${pageNumber}`,
+          label: `Inspecting text result from PDF page ${pageNumber}`,
+          status: 'info',
+          detail: buildPdfTextContentResultDiagnostics(textContent, pageNumber, readerLabel),
+        });
         parsedLines.push(
           ...getPdfPageLines(textContent.items as PdfTextItem[], pageNumber),
         );
       } catch (error) {
+        reportImportProgress(onProgress, {
+          stepId: `pdf-page-text-catch-${slugify(readerLabel)}-${pageNumber}`,
+          label: `PDF page ${pageNumber} text extraction exception captured`,
+          status: 'failed',
+          error: describeDetailedError(error),
+          detail: {
+            pageNumber,
+            readerLabel,
+            origin: 'page text extraction try/catch',
+            suspectedStatement: 'page.getTextContent() or PDF.js internals triggered by that call',
+            thrownError: inspectImportError(error),
+          },
+        });
         pageErrors.push(`Page ${pageNumber}: ${errorMessage(error)}`);
       } finally {
         page?.cleanup?.();
@@ -372,6 +403,155 @@ async function extractPdfTextWithReader(
     await safelyDestroy(document);
     await safelyDestroy(loadingTask);
   }
+}
+
+async function tracePdfTextContentCall({
+  onProgress,
+  page,
+  pageNumber,
+  readerLabel,
+}: {
+  onProgress?: ImportProgressReporter;
+  page: PdfPageLike | null;
+  pageNumber: number;
+  readerLabel: string;
+}) {
+  return traceImportStep(
+    {
+      stepId: `pdf-page-text-${slugify(readerLabel)}-${pageNumber}`,
+      label: `Reading text from PDF page ${pageNumber}`,
+      reporter: onProgress,
+      timeoutMs: 10000,
+      detail: {
+        pageNumber,
+        readerLabel,
+        exactStatement: 'page.getTextContent()',
+        sourceFile: 'app/src/features/curriculum-import/realFileAnalysis.ts',
+        functionName: 'tracePdfTextContentCall',
+        objectOrigin: 'PDF.js PDFPageProxy returned by document.getPage(pageNumber)',
+        preflight: buildPdfTextExtractionPreflight({
+          page,
+          pageNumber,
+          readerLabel,
+          statement: 'page.getTextContent()',
+        }),
+      },
+    },
+    async () => {
+      reportImportProgress(onProgress, {
+        stepId: `pdf-page-text-before-call-${slugify(readerLabel)}-${pageNumber}`,
+        label: `About to call page.getTextContent() for PDF page ${pageNumber}`,
+        status: 'info',
+        detail: {
+          exactStatement: 'return page.getTextContent();',
+          sourceFile: 'app/src/features/curriculum-import/realFileAnalysis.ts',
+          functionName: 'tracePdfTextContentCall',
+          pageNumber,
+          readerLabel,
+          preflight: buildPdfTextExtractionPreflight({
+            page,
+            pageNumber,
+            readerLabel,
+            statement: 'page.getTextContent()',
+          }),
+        },
+      });
+
+      if (!page) {
+        throw new Error('PDF page was not available before page.getTextContent().');
+      }
+
+      return page.getTextContent();
+    },
+  );
+}
+
+function buildPdfTextExtractionPreflight({
+  page,
+  pageNumber,
+  readerLabel,
+  statement,
+}: {
+  page: PdfPageLike | null;
+  pageNumber: number;
+  readerLabel: string;
+  statement: string;
+}) {
+  return {
+    statement,
+    pageNumber,
+    readerLabel,
+    page: describeObjectShape(page),
+    pageGetTextContentType: typeof page?.getTextContent,
+    pageCleanupType: typeof page?.cleanup,
+    promiseWithResolversType: typeof (Promise as unknown as { withResolvers?: unknown }).withResolvers,
+    readableStreamType: typeof ReadableStream,
+    transformStreamType: typeof TransformStream,
+    structuredCloneType: typeof structuredClone,
+    arrayFromAsyncType: typeof (Array as unknown as { fromAsync?: unknown }).fromAsync,
+    userAgent: navigator.userAgent,
+    platform: navigator.platform,
+    maxTouchPoints: navigator.maxTouchPoints,
+    objectOrigin: 'PDF.js PDFPageProxy returned by document.getPage(pageNumber)',
+  };
+}
+
+function buildPdfTextContentResultDiagnostics(
+  textContent: { items: unknown[] },
+  pageNumber: number,
+  readerLabel: string,
+) {
+  const firstItem = textContent.items[0] ?? null;
+
+  return {
+    pageNumber,
+    readerLabel,
+    textContent: describeObjectShape(textContent),
+    itemsIsArray: Array.isArray(textContent.items),
+    itemCount: textContent.items.length,
+    firstItem: describeObjectShape(firstItem),
+    firstItemStrType: typeof (firstItem as PdfTextItem | null)?.str,
+    firstItemTransformType: typeof (firstItem as PdfTextItem | null)?.transform,
+    firstItemTransformIsArray: Array.isArray((firstItem as PdfTextItem | null)?.transform),
+  };
+}
+
+function describeObjectShape(value: unknown) {
+  if (value === null) {
+    return { type: 'null' };
+  }
+
+  if (value === undefined) {
+    return { type: 'undefined' };
+  }
+
+  const valueAsRecord = value as Record<string, unknown>;
+  const prototype = Object.getPrototypeOf(value);
+
+  return {
+    type: typeof value,
+    constructorName: value?.constructor?.name ?? null,
+    ownKeys: safeKeys(valueAsRecord),
+    prototypeConstructorName: prototype?.constructor?.name ?? null,
+    prototypeKeys: safeKeys(prototype),
+  };
+}
+
+function safeKeys(value: unknown) {
+  try {
+    return Object.keys(value as Record<string, unknown>).slice(0, 40);
+  } catch (error) {
+    return [`Unable to read keys: ${errorMessage(error)}`];
+  }
+}
+
+function describeDetailedError(error: unknown) {
+  const stack = error instanceof Error ? error.stack : null;
+  return [
+    errorName(error),
+    errorMessage(error),
+    stack ? `Stack:\n${stack}` : 'Stack: not provided by browser',
+  ].join('\n');
 }
 
 function getPdfPageLines(items: PdfTextItem[], pageNumber: number): ParsedLine[] {
