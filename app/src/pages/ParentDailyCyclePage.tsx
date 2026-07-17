@@ -253,6 +253,8 @@ export function ParentDailyCyclePage() {
     setHomeschoolData((current) => upsertCurriculumRecord(current, curriculum));
     setDayState(createInitialDayState(curriculum.dailyCycle.prepTasks));
     setSelectedTaskId(curriculum.dailyCycle.learningTasks[0]?.id ?? '');
+    setActiveView('today');
+    setIsImportFlowOpen(false);
   }
 
   function handleSelectCurriculum(curriculumId: string) {
