@@ -619,6 +619,9 @@ function ImportDiagnosticLog({ events }: { events: ImportDiagnosticEvent[] }) {
           <ul>
             <li>Promise.withResolvers: {String(compatibilitySnapshot.promiseWithResolversType)}</li>
             <li>page.getTextContent: {String(compatibilitySnapshot.pageGetTextContentType)}</li>
+            <li>page.streamTextContent: {String(compatibilitySnapshot.pageStreamTextContentType)}</li>
+            <li>ReadableStream async iterator: {String(compatibilitySnapshot.readableStreamAsyncIteratorType)}</li>
+            <li>ReadableStream values: {String(compatibilitySnapshot.readableStreamValuesType)}</li>
             <li>Page constructor: {String(compatibilitySnapshot.pageConstructorName)}</li>
             <li>Page prototype keys: {compatibilitySnapshot.pagePrototypeKeys.join(', ') || 'none reported'}</li>
           </ul>
@@ -646,8 +649,11 @@ function ImportDiagnosticLog({ events }: { events: ImportDiagnosticEvent[] }) {
 type PdfCompatibilitySnapshot = {
   pageConstructorName: string | null;
   pageGetTextContentType: string;
+  pageStreamTextContentType: string;
   pagePrototypeKeys: string[];
   promiseWithResolversType: string;
+  readableStreamAsyncIteratorType: string;
+  readableStreamValuesType: string;
 };
 
 function findLatestPdfCompatibilitySnapshot(events: ImportDiagnosticEvent[]): PdfCompatibilitySnapshot | null {
@@ -664,8 +670,11 @@ function findLatestPdfCompatibilitySnapshot(events: ImportDiagnosticEvent[]): Pd
     return {
       pageConstructorName: page?.constructorName ?? null,
       pageGetTextContentType: String(preflight.pageGetTextContentType),
+      pageStreamTextContentType: String(preflight.pageStreamTextContentType),
       pagePrototypeKeys: Array.isArray(page?.prototypeKeys) ? page.prototypeKeys : [],
       promiseWithResolversType: String(preflight.promiseWithResolversType),
+      readableStreamAsyncIteratorType: String(preflight.readableStreamAsyncIteratorType),
+      readableStreamValuesType: String(preflight.readableStreamValuesType),
     };
   }
 
