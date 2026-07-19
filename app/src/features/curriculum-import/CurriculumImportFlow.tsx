@@ -608,9 +608,22 @@ function ImportDiagnosticLog({ events }: { events: ImportDiagnosticEvent[] }) {
     return null;
   }
 
+  const compatibilitySnapshot = findLatestPdfCompatibilitySnapshot(events);
+
   return (
     <section className="decision-engine-list" aria-label="Import diagnostic progress">
       <strong>Import progress log</strong>
+      {compatibilitySnapshot ? (
+        <div>
+          <span>PDF.js compatibility snapshot</span>
+          <ul>
+            <li>Promise.withResolvers: {String(compatibilitySnapshot.promiseWithResolversType)}</li>
+            <li>page.getTextContent: {String(compatibilitySnapshot.pageGetTextContentType)}</li>
+            <li>Page constructor: {String(compatibilitySnapshot.pageConstructorName)}</li>
+            <li>Page prototype keys: {compatibilitySnapshot.pagePrototypeKeys.join(', ') || 'none reported'}</li>
+          </ul>
+        </div>
+      ) : null}
       <ol>
         {events.slice(-80).map((event, index) => (
           <li key={`${event.stepId}-${event.timestamp}-${index}`}>
@@ -618,7 +631,7 @@ function ImportDiagnosticLog({ events }: { events: ImportDiagnosticEvent[] }) {
             <small>{formatDiagnosticStatus(event)}</small>
             {event.error ? <small>{event.error}</small> : null}
             {event.detail ? (
-              <details>
+              <details open={shouldOpenDiagnosticDetails(event)}>
                 <summary>Technical details</summary>
                 <pre>{JSON.stringify(event.detail, null, 2)}</pre>
               </details>
@@ -627,6 +640,62 @@ function ImportDiagnosticLog({ events }: { events: ImportDiagnosticEvent[] }) {
         ))}
       </ol>
     </section>
+  );
+}
+
+type PdfCompatibilitySnapshot = {
+  pageConstructorName: string | null;
+  pageGetTextContentType: string;
+  pagePrototypeKeys: string[];
+  promiseWithResolversType: string;
+};
+
+function findLatestPdfCompatibilitySnapshot(events: ImportDiagnosticEvent[]): PdfCompatibilitySnapshot | null {
+  for (const event of [...events].reverse()) {
+    const detail = event.detail as Record<string, unknown> | undefined;
+    const preflight = extractPreflightDetail(detail);
+
+    if (!preflight) {
+      continue;
+    }
+
+    const page = preflight.page as { constructorName?: string | null; prototypeKeys?: string[] } | undefined;
+
+    return {
+      pageConstructorName: page?.constructorName ?? null,
+      pageGetTextContentType: String(preflight.pageGetTextContentType),
+      pagePrototypeKeys: Array.isArray(page?.prototypeKeys) ? page.prototypeKeys : [],
+      promiseWithResolversType: String(preflight.promiseWithResolversType),
+    };
+  }
+
+  return null;
+}
+
+function extractPreflightDetail(detail: Record<string, unknown> | undefined) {
+  if (!detail) {
+    return null;
+  }
+
+  if ('pageGetTextContentType' in detail || 'promiseWithResolversType' in detail) {
+    return detail as Record<string, unknown>;
+  }
+
+  const nestedPreflight = detail.preflight;
+
+  if (nestedPreflight && typeof nestedPreflight === 'object') {
+    return nestedPreflight as Record<string, unknown>;
+  }
+
+  return null;
+}
+
+function shouldOpenDiagnosticDetails(event: ImportDiagnosticEvent) {
+  return (
+    event.status === 'failed' ||
+    event.status === 'timed-out' ||
+    event.stepId.includes('pdf-page-text-preflight') ||
+    event.stepId.includes('pdf-page-text-before-call')
   );
 }
 

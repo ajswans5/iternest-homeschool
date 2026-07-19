@@ -53,6 +53,7 @@ type PdfJsLike = {
     workerSrc: string;
   };
   getDocument: (options: Record<string, unknown>) => PdfLoadingTaskLike;
+  version?: string;
 };
 
 const INITIAL_IMPORT_PAGE_LIMIT = 40;
@@ -230,6 +231,15 @@ async function extractPdfText(
         },
         () => attempt.load(),
       );
+      reportImportProgress(onProgress, {
+        stepId: `pdf-reader-version-${slugify(attempt.label)}`,
+        label: `${attempt.label} version detected`,
+        status: 'info',
+        detail: {
+          readerLabel: attempt.label,
+          pdfjsVersion: pdfjs.version ?? 'not reported',
+        },
+      });
       const result = await extractPdfTextWithReader(pdfjs, originalBytes, attempt.label, onProgress);
 
       if (!bestResult || result.text.length > bestResult.text.length) {
