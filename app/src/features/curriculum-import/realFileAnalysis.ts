@@ -202,6 +202,8 @@ async function extractPdfText(
   file: File,
   onProgress?: ImportProgressReporter,
 ): Promise<TextExtractionResult> {
+  ensureReadableStreamAsyncIterationSupport(onProgress);
+
   const fileBuffer = await traceImportStep(
     {
       stepId: 'pdf-file-read',
@@ -262,6 +264,96 @@ async function extractPdfText(
     describePdfFailure(lastError),
     'The file was not treated as an OCR failure automatically because this error may come from browser PDF support, encryption, or a damaged download.',
   ]);
+}
+
+function ensureReadableStreamAsyncIterationSupport(onProgress?: ImportProgressReporter) {
+  if (typeof ReadableStream === 'undefined') {
+    reportImportProgress(onProgress, {
+      stepId: 'readable-stream-polyfill',
+      label: 'Checking ReadableStream async iteration support',
+      status: 'info',
+      detail: {
+        readableStreamType: 'undefined',
+        applied: false,
+        reason: 'ReadableStream is not available in this browser.',
+      },
+    });
+    return;
+  }
+
+  const prototype = ReadableStream.prototype as ReadableStream<unknown> & {
+    values?: () => AsyncIterableIterator<unknown>;
+    [Symbol.asyncIterator]?: () => AsyncIterableIterator<unknown>;
+  };
+  const hadValues = typeof prototype.values === 'function';
+  const hadAsyncIterator = typeof prototype[Symbol.asyncIterator] === 'function';
+
+  if (hadValues && hadAsyncIterator) {
+    reportImportProgress(onProgress, {
+      stepId: 'readable-stream-polyfill',
+      label: 'Checking ReadableStream async iteration support',
+      status: 'info',
+      detail: {
+        readableStreamType: typeof ReadableStream,
+        valuesType: typeof prototype.values,
+        asyncIteratorType: typeof prototype[Symbol.asyncIterator],
+        applied: false,
+        reason: 'Browser already supports ReadableStream async iteration.',
+      },
+    });
+    return;
+  }
+
+  const values = readableStreamValues;
+
+  if (!hadValues) {
+    Object.defineProperty(prototype, 'values', {
+      configurable: true,
+      writable: true,
+      value: values,
+    });
+  }
+
+  if (!hadAsyncIterator) {
+    Object.defineProperty(prototype, Symbol.asyncIterator, {
+      configurable: true,
+      writable: true,
+      value: values,
+    });
+  }
+
+  reportImportProgress(onProgress, {
+    stepId: 'readable-stream-polyfill',
+    label: 'Checking ReadableStream async iteration support',
+    status: 'info',
+    detail: {
+      readableStreamType: typeof ReadableStream,
+      previousValuesType: hadValues ? 'function' : 'undefined',
+      previousAsyncIteratorType: hadAsyncIterator ? 'function' : 'undefined',
+      valuesType: typeof prototype.values,
+      asyncIteratorType: typeof prototype[Symbol.asyncIterator],
+      applied: true,
+      reason: 'PDF.js getTextContent iterates a ReadableStream with for-await, but this browser did not expose values/asyncIterator.',
+    },
+  });
+}
+
+async function* readableStreamValues<T>(this: ReadableStream<T>): AsyncIterableIterator<T> {
+  const reader = this.getReader();
+
+  try {
+    while (true) {
+      const result = await reader.read();
+
+      if (result.done) {
+        return;
+      }
+
+      yield result.value;
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 async function loadLegacyPdfJs(): Promise<PdfJsLike> {
