@@ -56,8 +56,6 @@ type PdfJsLike = {
   version?: string;
 };
 
-const INITIAL_IMPORT_PAGE_LIMIT = 40;
-
 const knownSubjects = [
   'Arithmetic',
   'Math',
@@ -398,7 +396,7 @@ async function extractPdfTextWithReader(
     const parsedLines: ParsedLine[] = [];
     const limitations: string[] = [];
     const pageErrors: string[] = [];
-    const pagesToRead = Math.min(document.numPages, INITIAL_IMPORT_PAGE_LIMIT);
+    const pagesToRead = document.numPages;
     reportImportProgress(onProgress, {
       stepId: `pdf-page-count-${slugify(readerLabel)}`,
       label: `PDF page count detected with ${readerLabel}`,
@@ -479,12 +477,6 @@ async function extractPdfTextWithReader(
     } else {
       limitations.push(
         'This PDF exposed little or no readable text. OCR may be required before IterNest can understand the curriculum content.',
-      );
-    }
-
-    if (document.numPages > pagesToRead) {
-      limitations.push(
-        `This mobile-safe import pass read the first ${pagesToRead} of ${document.numPages} pages. It is intended to identify the curriculum and first usable lesson without crashing the browser.`,
       );
     }
 

@@ -102,7 +102,7 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
     });
 
     const handleImportProgress: ImportProgressReporter = (event) => {
-      setDiagnosticEvents((current) => [...current, event].slice(-160));
+      setDiagnosticEvents((current) => nextVisibleImportEvents(current, event));
     };
 
     debug.before('setCurrentAnalysisStepIndex(0), clear state, setStep(analyzing-source)');
@@ -190,7 +190,7 @@ export function CurriculumImportFlow({ onApprove, onCancel }: CurriculumImportFl
     }
 
     const handleImportProgress: ImportProgressReporter = (event) => {
-      setDiagnosticEvents((current) => [...current, event].slice(-160));
+      setDiagnosticEvents((current) => nextVisibleImportEvents(current, event));
     };
 
     setStep('saving');
@@ -327,7 +327,7 @@ function CurriculumParentReview({ analysisError, diagnosticEvents, result, onApp
         <p className="section-label">Curriculum Review</p>
         <h2>This file needs more help before IterNest can use it.</h2>
         <p>{analysisError}</p>
-        <ImportDiagnosticLog events={diagnosticEvents} />
+        {isImportDebugEnabled() ? <ImportDiagnosticLog events={diagnosticEvents} /> : null}
       </section>
     );
   }
@@ -338,7 +338,7 @@ function CurriculumParentReview({ analysisError, diagnosticEvents, result, onApp
         <p className="section-label">Curriculum Review</p>
         <h2>No review is ready yet.</h2>
         <p>Choose a curriculum file and run analysis first.</p>
-        <ImportDiagnosticLog events={diagnosticEvents} />
+        {isImportDebugEnabled() ? <ImportDiagnosticLog events={diagnosticEvents} /> : null}
       </section>
     );
   }
@@ -437,7 +437,7 @@ function CurriculumParentReview({ analysisError, diagnosticEvents, result, onApp
       </section>
 
       {isImportDebugEnabled() ? <DebugDecisionView decision={result.decision} /> : null}
-      <ImportDiagnosticLog events={diagnosticEvents} />
+      {isImportDebugEnabled() ? <ImportDiagnosticLog events={diagnosticEvents} /> : null}
 
       <button
         className="primary-action primary-action--inline"
@@ -723,6 +723,77 @@ function statusToAnalysisState(status: ImportDiagnosticEvent['status'], fallback
   if (status === 'failed' || status === 'timed-out') return 'current';
   if (status === 'started') return 'current';
   return fallback;
+}
+
+function nextVisibleImportEvents(current: ImportDiagnosticEvent[], event: ImportDiagnosticEvent) {
+  if (isImportDebugEnabled()) {
+    return [...current, event].slice(-160);
+  }
+
+  if (shouldKeepParentProgressEvent(event)) {
+    return [...current, event].slice(-20);
+  }
+
+  const latestPdfPageEvent = findLastImportEventIndex(current, 'pdf-page-progress');
+  const compactEvent = compactPdfPageProgressEvent(event);
+
+  if (!compactEvent) {
+    return current;
+  }
+
+  if (latestPdfPageEvent === -1) {
+    return [...current, compactEvent].slice(-20);
+  }
+
+  return current.map((existingEvent, index) => (index === latestPdfPageEvent ? compactEvent : existingEvent));
+}
+
+function findLastImportEventIndex(events: ImportDiagnosticEvent[], stepId: string) {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (events[index]?.stepId === stepId) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+function shouldKeepParentProgressEvent(event: ImportDiagnosticEvent) {
+  return (
+    event.status === 'failed' ||
+    event.status === 'timed-out' ||
+    [
+      'browser-environment',
+      'browser-storage-estimate',
+      'readable-stream-polyfill',
+      'pdf-file-read',
+      'source-analysis',
+      'curriculum-analysis',
+      'lesson-model',
+      'curriculum-summary',
+      'parent-decision',
+      'persisted-record',
+      'approval-start',
+      'serialize-curriculum-data',
+      'save-curriculum-local-storage',
+      'navigation-after-import',
+    ].includes(event.stepId)
+  );
+}
+
+function compactPdfPageProgressEvent(event: ImportDiagnosticEvent): ImportDiagnosticEvent | null {
+  if (!event.stepId.startsWith('pdf-page-text-result-') && !event.stepId.startsWith('pdf-page-load-')) {
+    return null;
+  }
+
+  const pageNumber = typeof event.detail?.pageNumber === 'number' ? event.detail.pageNumber : null;
+
+  return {
+    ...event,
+    stepId: 'pdf-page-progress',
+    label: pageNumber ? `Reading PDF pages... page ${pageNumber}` : 'Reading PDF pages...',
+    detail: undefined,
+  };
 }
 
 function getBrowserImportDiagnostics(file: File) {

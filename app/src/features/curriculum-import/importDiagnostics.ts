@@ -101,7 +101,9 @@ export function reportImportProgress(
     return;
   }
 
-  console.info(`[IterNest import diagnostic] ${completeEvent.label}`, consolePayload);
+  if (isImportDiagnosticConsoleEnabled()) {
+    console.info(`[IterNest import diagnostic] ${completeEvent.label}`, consolePayload);
+  }
 }
 
 export function describeImportError(error: unknown) {
@@ -192,4 +194,15 @@ class ImportStepTimeoutError extends Error {
     super(`${label} exceeded ${timeoutMs}ms and was stopped so the UI would not wait forever.`);
     this.name = 'ImportStepTimeoutError';
   }
+}
+
+function isImportDiagnosticConsoleEnabled() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return (
+    window.localStorage.getItem('iternest-debug-import') === 'true' ||
+    new URLSearchParams(window.location.search).get('debugImport') === 'true'
+  );
 }
